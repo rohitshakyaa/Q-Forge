@@ -1,0 +1,111 @@
+# =========================
+# Global
+# =========================
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
+.idea/
+.vscode/
+*.bak
+
+# =========================
+# Environment files
+# =========================
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# =========================
+# Docker
+# =========================
+build/nginx/log/
+build/data/
+docker-data/
+*.pid
+
+# =========================
+# Laravel app
+# =========================
+code/vendor/
+code/node_modules/
+code/public/build/
+code/public/hot
+code/storage/*.key
+code/storage/logs/*.log
+code/storage/framework/cache/*
+!code/storage/framework/cache/.gitignore
+code/storage/framework/sessions/*
+!code/storage/framework/sessions/.gitignore
+code/storage/framework/testing/*
+!code/storage/framework/testing/.gitignore
+code/storage/framework/views/*
+!code/storage/framework/views/.gitignore
+code/storage/app/public/*
+!code/storage/app/public/.gitignore
+code/bootstrap/cache/*
+!code/bootstrap/cache/.gitignore
+
+# PHPUnit / coverage
+code/.phpunit.result.cache
+code/coverage/
+code/.coverage
+
+# Laravel Pint / PHPStan / IDE
+code/.pint.cache
+code/phpstan.neon.dist.bak
+
+# =========================
+# Frontend app
+# =========================
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/.cache/
+frontend/.eslintcache
+
+# frontend envs
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# =========================
+# Python service
+# =========================
+python-service/__pycache__/
+python-service/*.py[cod]
+python-service/*$py.class
+python-service/.Python
+python-service/.pytest_cache/
+python-service/.mypy_cache/
+python-service/.ruff_cache/
+python-service/.coverage
+python-service/htmlcov/
+python-service/build/
+python-service/dist/
+python-service/*.egg-info/
+python-service/.venv/
+python-service/venv/
+python-service/env/
+python-service/.env
+python-service/.env.*
+!python-service/.env.example
+
+# =========================
+# OS / editor junk inside subdirs
+# =========================
+**/.DS_Store
+**/.idea/
+**/.vscode/
+
+# =========================
+# Optional uploaded/generated files
+# Uncomment if you do not want local uploads committed
+# =========================
+# code/storage/app/documents/
+# code/storage/app/exports/
+# code/storage/app/temp/
