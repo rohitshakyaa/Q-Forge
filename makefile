@@ -131,6 +131,9 @@ sh-python:
 sh-db:
 	$(DOCKER_COMPOSE) exec $(DB_SERVICE) mysql -uroot -p
 
+restart-frontend:
+	$(DOCKER_COMPOSE) restart $(FRONTEND_SERVICE)
+
 composer:
 	$(DOCKER_COMPOSE) exec $(APP_SERVICE) composer
 

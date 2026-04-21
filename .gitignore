@@ -109,3 +109,8 @@ python-service/.env.*
 # code/storage/app/documents/
 # code/storage/app/exports/
 # code/storage/app/temp/
+
+.codex
+Q Forge-handoff.zip
+react-frontend
+.claude
