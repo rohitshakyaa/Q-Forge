@@ -64,108 +64,49 @@ const submit = async () => {
 </script>
 
 <template>
-  <div style="min-height: 100vh; display: flex; background: var(--bg)">
-    <div
-      style="
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 40px;
-        position: relative;
-        overflow: hidden;
-      "
-    >
+  <div class="min-h-screen flex flex-col-reverse lg:flex-row bg-bg">
+    <div class="flex-1 flex flex-col items-center justify-center px-6 py-10 sm:p-10 relative overflow-hidden">
       <div
+        class="absolute inset-0 opacity-30"
         style="
-          position: absolute;
-          inset: 0;
           background-image: linear-gradient(var(--border) 1px, transparent 1px),
             linear-gradient(90deg, var(--border) 1px, transparent 1px);
           background-size: 40px 40px;
-          opacity: 0.3;
         "
       />
       <div
-        style="
-          position: absolute;
-          top: 20%;
-          left: 10%;
-          width: 400px;
-          height: 400px;
-          background: radial-gradient(circle, oklch(0.75 0.19 196 / 0.1), transparent 70%);
-          pointer-events: none;
-        "
+        class="absolute top-[20%] left-[10%] w-[400px] h-[400px] pointer-events-none"
+        style="background: radial-gradient(circle, oklch(0.75 0.19 196 / 0.1), transparent 70%);"
       />
-      <div style="position: relative; z-index: 1; text-align: center; max-width: 400px; width: 100%">
-        <div style="margin-bottom: 40px">
-          <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 20px">
+      <div class="relative z-[1] text-center max-w-[400px] w-full">
+        <div class="mb-10">
+          <div class="inline-flex items-center gap-2.5 mb-5">
             <div
-              style="
-                width: 40px;
-                height: 40px;
-                background: linear-gradient(135deg, var(--cyan), var(--indigo));
-                border-radius: 12px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 20px;
-                font-weight: 800;
-                color: #070a10;
-                font-family: var(--font-head);
-              "
+              class="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-extrabold text-bg font-head"
+              style="background: linear-gradient(135deg, var(--cyan), var(--indigo));"
             >
               Q
             </div>
-            <span style="font-family: var(--font-head); font-size: 22px; font-weight: 700">
+            <span class="font-head text-[22px] font-bold">
               QForge
             </span>
           </div>
-          <h2
-            style="
-              font-family: var(--font-head);
-              font-size: 28px;
-              font-weight: 700;
-              margin-bottom: 12px;
-              letter-spacing: -0.03em;
-            "
-          >
+          <h2 class="font-head text-[26px] sm:text-[28px] font-bold mb-3 tracking-[-0.03em]">
             {{ mode === 'login' ? 'Welcome back' : 'Create your account' }}
           </h2>
-          <p style="color: var(--text2); font-size: 14px">
+          <p class="text-text2 text-sm">
             Smart question paper generation for educators
           </p>
         </div>
 
-        <div
-          style="
-            display: flex;
-            gap: 8px;
-            margin-bottom: 24px;
-            background: var(--bg2);
-            padding: 4px;
-            border-radius: var(--radius);
-          "
-        >
+        <div class="flex gap-2 mb-6 bg-bg2 p-1 rounded-md">
           <button
             v-for="r in (['teacher', 'admin'] as UserRole[])"
             :key="r"
             type="button"
-            :style="{
-              flex: 1,
-              padding: '8px',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 600,
-              transition: 'all 0.15s',
-              background: role === r ? 'var(--bg1)' : 'transparent',
-              color: role === r ? 'var(--text)' : 'var(--text3)',
-              boxShadow: role === r ? '0 1px 4px #0004' : 'none',
-              fontFamily: 'var(--font-body)',
-            }"
+            class="flex-1 py-2 border-none rounded-md cursor-pointer text-[13px] font-semibold transition-all duration-150 font-body"
+            :class="role === r ? 'bg-bg1 text-text' : 'bg-transparent text-text3'"
+            :style="role === r ? 'box-shadow: 0 1px 4px #0004' : ''"
             @click="role = r"
           >
             {{ r === 'teacher' ? 'Teacher' : 'Administrator' }}
@@ -173,7 +114,7 @@ const submit = async () => {
         </div>
 
         <form
-          style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px; text-align: left"
+          class="flex flex-col gap-3.5 mb-5 text-left"
           @submit.prevent="submit"
         >
           <QFInput
@@ -199,15 +140,7 @@ const submit = async () => {
 
           <div
             v-if="errorMessage"
-            style="
-              background: var(--danger-dim);
-              border: 1px solid var(--danger);
-              border-radius: var(--radius);
-              padding: 10px 14px;
-              color: var(--danger);
-              font-size: 13px;
-              text-align: left;
-            "
+            class="bg-danger-dim border border-danger rounded-md px-3.5 py-2.5 text-danger text-[13px] text-left"
           >
             {{ errorMessage }}
           </div>
@@ -217,7 +150,7 @@ const submit = async () => {
             variant="primary"
             :disabled="authStore.loading"
             block
-            :style="{ padding: '11px', fontSize: '15px' }"
+            class="!py-[11px] !text-[15px]"
           >
             <template v-if="authStore.loading" #icon>
               <QFSpinner :size="16" />
@@ -226,10 +159,10 @@ const submit = async () => {
           </QFButton>
         </form>
 
-        <div style="margin-top: 20px; color: var(--text3); font-size: 13px">
+        <div class="mt-5 text-text3 text-[13px]">
           {{ mode === 'login' ? "Don't have an account? " : 'Already have an account? ' }}
           <span
-            style="color: var(--cyan); cursor: pointer; font-weight: 500"
+            class="text-cyan cursor-pointer font-medium"
             @click="toggleMode"
           >
             {{ mode === 'login' ? 'Sign up' : 'Sign in' }}
@@ -238,100 +171,47 @@ const submit = async () => {
       </div>
     </div>
 
-    <div
-      style="
-        width: 420px;
-        background: var(--bg1);
-        border-left: 1px solid var(--border);
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        padding: 48px;
-        gap: 20px;
-      "
-    >
-      <div style="margin-bottom: 8px">
-        <div
-          style="
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--text3);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 16px;
-          "
-        >
+    <div class="w-full lg:w-[420px] bg-bg1 border-b lg:border-b-0 lg:border-l border-border flex flex-col justify-center px-6 py-8 sm:p-12 gap-5">
+      <div class="mb-2">
+        <div class="text-[11px] font-semibold text-text3 uppercase tracking-[0.08em] mb-4">
           System activity
         </div>
         <div
           v-for="s in stats"
           :key="s.label"
-          style="
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border);
-          "
+          class="flex items-center gap-3 py-3 border-b border-border"
         >
           <div
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0"
             :style="{
-              width: '32px',
-              height: '32px',
               background: `color-mix(in oklab, ${s.color} 10%, transparent)`,
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
               color: s.color,
-              fontSize: '14px',
-              flexShrink: 0,
             }"
           >
             {{ s.icon }}
           </div>
-          <div style="flex: 1">
-            <div style="font-size: 12px; color: var(--text3)">{{ s.label }}</div>
+          <div class="flex-1">
+            <div class="text-xs text-text3">{{ s.label }}</div>
             <div
-              :style="{
-                fontFamily: 'var(--font-head)',
-                fontSize: '18px',
-                fontWeight: 700,
-                color: s.color,
-              }"
+              class="font-head text-lg font-bold"
+              :style="{ color: s.color }"
             >
               {{ s.val }}
             </div>
           </div>
         </div>
       </div>
-      <div
-        style="
-          background: var(--bg2);
-          border-radius: var(--radius);
-          padding: 16px;
-          border: 1px solid var(--border);
-        "
-      >
-        <div
-          style="
-            font-size: 11px;
-            color: var(--text3);
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            font-weight: 600;
-          "
-        >
+      <div class="bg-bg2 rounded-md p-4 border border-border">
+        <div class="text-[11px] text-text3 mb-2.5 uppercase tracking-[0.08em] font-semibold">
           Latest generation
         </div>
-        <div style="font-family: var(--font-head); font-weight: 600; margin-bottom: 4px">
+        <div class="font-head font-semibold mb-1">
           Advanced Mathematics — Final Exam
         </div>
-        <div style="color: var(--text3); font-size: 12.5px; margin-bottom: 10px">
+        <div class="text-text3 text-[12.5px] mb-2.5">
           28 questions · 100 marks · 3 units covered
         </div>
-        <div style="display: flex; gap: 6px; flex-wrap: wrap">
+        <div class="flex gap-1.5 flex-wrap">
           <QFBadge variant="success">All constraints met</QFBadge>
           <QFBadge variant="ai">✦ AI assisted</QFBadge>
         </div>

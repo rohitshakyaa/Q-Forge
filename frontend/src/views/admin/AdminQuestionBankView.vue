@@ -37,6 +37,10 @@ const diffColor: Record<string, string> = {
     <QFPageHeader
       title="Question Bank"
       :subtitle="`${catalog.questionBank.length} approved questions across all subjects`"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/admin' },
+        { label: 'Question Bank' },
+      ]"
     >
       <template #actions>
         <QFButton variant="ai">
@@ -47,20 +51,20 @@ const diffColor: Record<string, string> = {
       </template>
     </QFPageHeader>
 
-    <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end">
-      <div class="qf-field" style="width: 280px; margin: 0">
+    <div class="flex flex-wrap gap-3 mb-5 items-end">
+      <div class="qf-field flex-1 min-w-[220px] sm:flex-none sm:w-72 m-0">
         <input v-model="search" class="qf-input" placeholder="Search questions…" />
       </div>
-      <div style="width: 200px">
+      <div class="w-full sm:w-52">
         <QFSelect v-model="subjectFilter" :options="subjectOptions" />
       </div>
-      <div style="width: 160px">
+      <div class="w-full sm:w-40">
         <QFSelect
           v-model="typeFilter"
           :options="['All Types', 'Short Answer', 'Long Answer', 'MCQ', 'Programming']"
         />
       </div>
-      <div style="width: 160px">
+      <div class="w-full sm:w-40">
         <QFSelect
           v-model="difficultyFilter"
           :options="['All Difficulties', 'Easy', 'Medium', 'Hard']"
@@ -69,6 +73,7 @@ const diffColor: Record<string, string> = {
     </div>
 
     <QFCard>
+      <div class="qf-table-wrap">
       <table class="qf-table">
         <thead>
           <tr>
@@ -143,6 +148,7 @@ const diffColor: Record<string, string> = {
           </tr>
         </tbody>
       </table>
+      </div>
     </QFCard>
   </div>
 </template>

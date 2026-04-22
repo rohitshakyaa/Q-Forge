@@ -62,268 +62,121 @@ const goToLogin = () => router.push('/login');
 </script>
 
 <template>
-  <div style="min-height: 100vh; background: var(--bg); overflow-y: auto; font-family: var(--font-body)">
+  <div class="min-h-screen bg-bg overflow-y-auto font-body">
     <div
+      class="fixed inset-0 pointer-events-none z-0 opacity-40"
       style="
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 0;
         background-image: linear-gradient(var(--border) 1px, transparent 1px),
           linear-gradient(90deg, var(--border) 1px, transparent 1px);
         background-size: 48px 48px;
-        opacity: 0.4;
       "
     />
     <div
-      style="
-        position: fixed;
-        top: -10%;
-        left: 30%;
-        width: 600px;
-        height: 600px;
-        background: radial-gradient(circle, oklch(0.75 0.19 196 / 0.07), transparent 70%);
-        pointer-events: none;
-        z-index: 0;
-      "
+      class="fixed top-[-10%] left-[30%] w-[600px] h-[600px] pointer-events-none z-0"
+      style="background: radial-gradient(circle, oklch(0.75 0.19 196 / 0.07), transparent 70%);"
     />
 
-    <nav
-      style="
-        position: relative;
-        z-index: 10;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 16px 48px;
-        border-bottom: 1px solid var(--border);
-      "
-    >
-      <div style="display: flex; align-items: center; gap: 10px">
+    <nav class="relative z-10 flex items-center justify-between px-4 sm:px-8 lg:px-12 py-4 border-b border-border">
+      <div class="flex items-center gap-2.5">
         <div
-          style="
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, var(--cyan), var(--indigo));
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            font-weight: 800;
-            color: #070a10;
-            font-family: var(--font-head);
-          "
+          class="w-8 h-8 rounded-[10px] flex items-center justify-center text-base font-extrabold text-bg font-head"
+          style="background: linear-gradient(135deg, var(--cyan), var(--indigo));"
         >
           Q
         </div>
-        <span
-          style="
-            font-family: var(--font-head);
-            font-size: 18px;
-            font-weight: 700;
-            letter-spacing: -0.03em;
-          "
-        >
-          QForge
-        </span>
+        <span class="font-head text-lg font-bold tracking-tight">QForge</span>
         <QFBadge variant="cyan">Beta</QFBadge>
       </div>
-      <div style="display: flex; gap: 8px">
+      <div class="flex gap-2">
         <QFButton variant="ghost" @click="goToLogin">Sign in</QFButton>
         <QFButton variant="primary" @click="goToLogin">Get started →</QFButton>
       </div>
     </nav>
 
-    <div style="position: relative; z-index: 1; text-align: center; padding: 100px 48px 80px">
+    <div class="relative z-10 text-center px-4 sm:px-8 lg:px-12 pt-16 sm:pt-20 lg:pt-24 pb-16 lg:pb-20">
       <div
-        style="
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          background: var(--ai-dim);
-          border: 1px solid oklch(0.72 0.18 230 / 0.3);
-          border-radius: 20px;
-          padding: 5px 14px;
-          margin-bottom: 28px;
-        "
+        class="inline-flex items-center gap-2 bg-ai-dim rounded-[20px] px-3.5 py-[5px] mb-7"
+        style="border: 1px solid oklch(0.72 0.18 230 / 0.3);"
       >
-        <span style="color: var(--ai); font-size: 12px">✦</span>
-        <span style="color: var(--ai); font-size: 12.5px; font-weight: 500">
+        <span class="text-ai text-xs">✦</span>
+        <span class="text-ai text-[12.5px] font-medium">
           AI-Powered Question Paper Generation
         </span>
       </div>
-      <h1
-        style="
-          font-family: var(--font-head);
-          font-size: 58px;
-          font-weight: 800;
-          line-height: 1.08;
-          letter-spacing: -0.04em;
-          margin: 0 auto 24px;
-          max-width: 820px;
-        "
-      >
+      <h1 class="font-head text-4xl sm:text-5xl lg:text-[58px] font-extrabold leading-[1.08] tracking-[-0.04em] mx-auto mb-6 max-w-[820px]">
         Generate exam papers<br />
         <span
-          style="
-            background: linear-gradient(135deg, var(--cyan), var(--indigo));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-          "
+          class="bg-clip-text text-transparent"
+          style="background-image: linear-gradient(135deg, var(--cyan), var(--indigo)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;"
         >without the guesswork</span>
       </h1>
-      <p
-        style="
-          font-size: 18px;
-          color: var(--text2);
-          max-width: 520px;
-          margin: 0 auto 40px;
-          line-height: 1.7;
-        "
-      >
+      <p class="text-base sm:text-lg text-text2 max-w-[520px] mx-auto mb-10 leading-[1.7]">
         Transform your syllabus and past papers into an intelligent question bank. Build blueprints. Generate perfectly structured exam papers in seconds.
       </p>
-      <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap">
-        <QFButton
-          variant="primary"
-          size="lg"
-          @click="goToLogin"
-        >
+      <div class="flex gap-3 justify-center flex-wrap">
+        <QFButton variant="primary" size="lg" @click="goToLogin">
           Start for free →
         </QFButton>
         <QFButton variant="secondary" size="lg" @click="goToLogin">View demo</QFButton>
       </div>
     </div>
 
-    <div
-      style="
-        position: relative;
-        z-index: 1;
-        display: flex;
-        gap: 20px;
-        justify-content: center;
-        padding: 0 48px 80px;
-        flex-wrap: wrap;
-      "
-    >
+    <div class="relative z-10 flex gap-5 justify-center px-4 sm:px-8 lg:px-12 pb-16 lg:pb-20 flex-wrap">
       <div
         v-for="r in roles"
         :key="r.role"
+        class="bg-bg1 border rounded-[var(--radius-lg)] px-8 py-8 w-full sm:w-[320px] max-w-[320px] cursor-pointer transition-all duration-200"
         :style="{
-          background: 'var(--bg1)',
-          border: `1px solid ${hovered === r.role ? r.color : 'var(--border)'}`,
-          borderRadius: 'var(--radius-lg)',
-          padding: '32px 36px',
-          maxWidth: '320px',
-          cursor: 'pointer',
-          transition: 'all 0.2s',
+          borderColor: hovered === r.role ? r.color : 'var(--border)',
           boxShadow: hovered === r.role ? `0 0 30px ${r.color}20` : 'none',
         }"
         @mouseenter="hovered = r.role"
         @mouseleave="hovered = null"
         @click="goToLogin"
       >
-        <div style="font-size: 36px; margin-bottom: 16px">{{ r.icon }}</div>
-        <div
-          style="
-            font-family: var(--font-head);
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: var(--text);
-          "
-        >
+        <div class="text-4xl mb-4">{{ r.icon }}</div>
+        <div class="font-head text-xl font-bold mb-2.5 text-text">
           {{ r.role }}
         </div>
-        <p style="color: var(--text2); font-size: 13.5px; line-height: 1.6; margin-bottom: 20px">
+        <p class="text-text2 text-[13.5px] leading-[1.6] mb-5">
           {{ r.desc }}
         </p>
-        <span :style="{ color: r.color, fontSize: '13px', fontWeight: 600 }">
+        <span :style="{ color: r.color }" class="text-[13px] font-semibold">
           {{ r.action }}
         </span>
       </div>
     </div>
 
-    <div
-      style="position: relative; z-index: 1; padding: 0 48px 80px; max-width: 1100px; margin: 0 auto"
-    >
-      <div style="text-align: center; margin-bottom: 48px">
-        <h2
-          style="
-            font-family: var(--font-head);
-            font-size: 32px;
-            font-weight: 700;
-            letter-spacing: -0.03em;
-            margin-bottom: 12px;
-          "
-        >
+    <div class="relative z-10 px-4 sm:px-8 lg:px-12 pb-16 lg:pb-20 max-w-[1100px] mx-auto">
+      <div class="text-center mb-12">
+        <h2 class="font-head text-2xl sm:text-[32px] font-bold tracking-[-0.03em] mb-3">
           Everything you need
         </h2>
-        <p style="color: var(--text2); font-size: 15px">
+        <p class="text-text2 text-[15px]">
           End-to-end question paper management for modern academic institutions
         </p>
       </div>
-      <div
-        style="
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-          gap: 20px;
-        "
-      >
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div
           v-for="f in features"
           :key="f.title"
-          style="
-            background: var(--bg1);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 24px;
-          "
+          class="bg-bg1 border border-border rounded-[var(--radius-lg)] p-6"
         >
-          <div :style="{ fontSize: '24px', marginBottom: '14px', color: f.color }">{{ f.icon }}</div>
-          <div
-            style="
-              font-family: var(--font-head);
-              font-size: 15px;
-              font-weight: 600;
-              margin-bottom: 8px;
-            "
-          >
+          <div :style="{ color: f.color }" class="text-2xl mb-3.5">{{ f.icon }}</div>
+          <div class="font-head text-[15px] font-semibold mb-2">
             {{ f.title }}
           </div>
-          <p style="color: var(--text2); font-size: 13px; line-height: 1.6">{{ f.desc }}</p>
+          <p class="text-text2 text-[13px] leading-[1.6]">{{ f.desc }}</p>
         </div>
       </div>
     </div>
 
-    <div
-      style="
-        position: relative;
-        z-index: 1;
-        border-top: 1px solid var(--border);
-        border-bottom: 1px solid var(--border);
-        background: var(--bg1);
-        padding: 32px 48px;
-        display: flex;
-        justify-content: center;
-        gap: 64px;
-        flex-wrap: wrap;
-      "
-    >
-      <div v-for="[val, lbl] in stats" :key="lbl" style="text-align: center">
-        <div
-          style="
-            font-family: var(--font-head);
-            font-size: 28px;
-            font-weight: 800;
-            color: var(--cyan);
-            letter-spacing: -0.03em;
-          "
-        >
+    <div class="relative z-10 border-t border-b border-border bg-bg1 px-4 sm:px-8 lg:px-12 py-8 flex justify-center gap-8 sm:gap-16 flex-wrap">
+      <div v-for="[val, lbl] in stats" :key="lbl" class="text-center">
+        <div class="font-head text-2xl sm:text-[28px] font-extrabold text-cyan tracking-[-0.03em]">
           {{ val }}
         </div>
-        <div style="color: var(--text3); font-size: 12.5px; margin-top: 4px">{{ lbl }}</div>
+        <div class="text-text3 text-[12.5px] mt-1">{{ lbl }}</div>
       </div>
     </div>
   </div>

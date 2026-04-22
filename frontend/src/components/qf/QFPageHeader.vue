@@ -1,53 +1,57 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router';
+import type { RouteLocationRaw } from 'vue-router';
+
+export interface Crumb {
+  label: string;
+  to?: RouteLocationRaw;
+}
+
 defineProps<{
   title: string;
   subtitle?: string;
-  back?: string;
+  breadcrumbs?: Crumb[];
 }>();
-
-const emit = defineEmits<{ back: [] }>();
 </script>
 
 <template>
-  <div style="margin-bottom: 24px">
-    <button
-      v-if="back"
-      class="qf-btn qf-btn-ghost qf-btn-sm"
-      style="margin-bottom: 10px; padding-left: 0; color: var(--text3)"
-      @click="emit('back')"
+  <div class="mb-6">
+    <nav
+      v-if="breadcrumbs && breadcrumbs.length"
+      aria-label="Breadcrumb"
+      class="flex flex-wrap items-center gap-1.5 mb-2.5 text-[12.5px] text-text3"
     >
-      ← {{ back }}
-    </button>
-    <div
-      style="
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 16px;
-      "
-    >
-      <div>
-        <h1
-          style="
-            font-family: var(--font-head);
-            font-size: 22px;
-            font-weight: 700;
-            color: var(--text);
-            line-height: 1.2;
-          "
-        >
+      <template v-for="(crumb, i) in breadcrumbs" :key="i">
+        <RouterLink
+          v-if="crumb.to && i < breadcrumbs.length - 1"
+          :to="crumb.to"
+          class="text-text2 no-underline transition-colors hover:text-cyan"
+        >{{ crumb.label }}</RouterLink>
+        <span
+          v-else
+          :class="i === breadcrumbs.length - 1 ? 'text-text font-medium' : 'text-text2'"
+        >{{ crumb.label }}</span>
+        <span
+          v-if="i < breadcrumbs.length - 1"
+          class="text-text3 select-none"
+        >/</span>
+      </template>
+    </nav>
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <div class="min-w-0">
+        <h1 class="font-head text-[20px] sm:text-[22px] font-bold text-text leading-tight">
           {{ title }}
         </h1>
         <p
           v-if="subtitle"
-          style="color: var(--text3); font-size: 13.5px; margin-top: 4px"
+          class="text-text3 text-[13.5px] mt-1"
         >
           {{ subtitle }}
         </p>
       </div>
       <div
         v-if="$slots.actions"
-        style="display: flex; gap: 8px; flex-shrink: 0"
+        class="flex flex-wrap gap-2 shrink-0"
       >
         <slot name="actions" />
       </div>

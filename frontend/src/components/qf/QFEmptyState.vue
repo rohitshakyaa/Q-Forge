@@ -12,32 +12,12 @@ withDefaults(
 </script>
 
 <template>
-  <div
-    style="
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 60px 32px;
-      gap: 12px;
-      text-align: center;
-    "
-  >
-    <div style="font-size: 40px; opacity: 0.3">{{ icon }}</div>
-    <div
-      style="
-        font-family: var(--font-head);
-        font-size: 16px;
-        font-weight: 600;
-        color: var(--text2);
-      "
-    >
+  <div class="flex flex-col items-center justify-center px-6 py-12 sm:px-8 sm:py-[60px] gap-3 text-center">
+    <div class="text-[40px] opacity-30">{{ icon }}</div>
+    <div class="font-head text-base font-semibold text-text2">
       {{ title }}
     </div>
-    <div
-      v-if="desc"
-      style="font-size: 13.5px; color: var(--text3); max-width: 360px"
-    >
+    <div v-if="desc" class="text-[13.5px] text-text3 max-w-[360px]">
       {{ desc }}
     </div>
     <slot name="action" />

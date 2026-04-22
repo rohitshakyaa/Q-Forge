@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { QFBadge, QFButton, QFCard, QFPageHeader } from '../../components/qf';
 import { usePapersStore } from '../../stores/papers';
 
 const route = useRoute();
-const router = useRouter();
 const store = usePapersStore();
 
 const paperId = Number(route.params.id);
@@ -26,12 +25,16 @@ const download = () => {
 </script>
 
 <template>
-  <div v-if="paper" class="qf-content qf-anim-in" style="max-width: 640px">
+  <div v-if="paper" class="qf-content qf-anim-in">
     <QFPageHeader
       title="Export Paper"
       :subtitle="`${paper.name} — ${paper.subject}`"
-      back="Paper View"
-      @back="router.push(`/teacher/paper/${paper.id}`)"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/teacher' },
+        { label: 'Generate', to: '/teacher/generate' },
+        { label: paper.name, to: `/teacher/paper/${paper.id}` },
+        { label: 'Export' },
+      ]"
     />
     <QFCard style="margin-bottom: 20px">
       <div class="qf-card-body">

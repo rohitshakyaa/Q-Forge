@@ -6,11 +6,15 @@ import {
   QFBadge,
   QFButton,
   QFCard,
+  QFInput,
   QFPageHeader,
   QFProgress,
+  QFSelect,
 } from '../../components/qf';
+import { useCatalogStore } from '../../stores/catalog';
 
 const router = useRouter();
+const catalog = useCatalogStore();
 
 interface UploadFile {
   name: string;
@@ -18,14 +22,24 @@ interface UploadFile {
   status: 'done' | 'processing' | 'review';
   progress: number;
   questions: number | null;
+  subject: string;
+  year: string;
 }
+
+const subjectOptions = catalog.subjects.map((s) => ({ value: s.code, label: `${s.code} — ${s.name}` }));
+const selectedSubject = ref(subjectOptions[0]?.value ?? 'CS301');
+const examYear = ref('');
 
 const dragover = ref(false);
 const files = ref<UploadFile[]>([
-  { name: 'DBMS_Finals_2023.pdf', size: '2.4 MB', status: 'done', progress: 100, questions: 55 },
-  { name: 'Algorithms_PastPapers.pdf', size: '3.8 MB', status: 'processing', progress: 62, questions: null },
-  { name: 'NetworkingSyllabus.pdf', size: '1.1 MB', status: 'review', progress: 100, questions: 31 },
+  { name: 'DBMS_Finals_2023.pdf', size: '2.4 MB', status: 'done', progress: 100, questions: 55, subject: 'CS303', year: '2023' },
+  { name: 'Algorithms_PastPapers.pdf', size: '3.8 MB', status: 'processing', progress: 62, questions: null, subject: 'CS302', year: '2024' },
+  { name: 'NetworkingSyllabus.pdf', size: '1.1 MB', status: 'review', progress: 100, questions: 31, subject: 'CS302', year: '2022' },
 ]);
+
+const openReview = (f: UploadFile) => {
+  router.push({ path: '/admin/review', query: { file: f.name, subject: f.subject, year: f.year } });
+};
 
 const simulateUpload = () => {
   const newFile: UploadFile = {
@@ -34,6 +48,8 @@ const simulateUpload = () => {
     status: 'processing',
     progress: 0,
     questions: null,
+    subject: selectedSubject.value,
+    year: examYear.value.trim() || '—',
   };
   files.value = [newFile, ...files.value];
   let p = 0;
@@ -77,14 +93,36 @@ const pipeline = [
 <template>
   <div class="qf-content qf-anim-in">
     <QFPageHeader
-      title="PDF Upload & Processing"
-      subtitle="Upload syllabus documents and past question papers for AI extraction"
-      back="Dashboard"
-      @back="router.push('/admin')"
+      title="Past Papers Upload"
+      subtitle="Drop past question papers or syllabus PDFs — AI extracts questions, marks, and unit tags for review"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/admin' },
+        { label: 'Past Papers Upload' },
+      ]"
     />
 
-    <div style="display: grid; grid-template-columns: 1fr 320px; gap: 24px">
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
       <div>
+        <div class="flex flex-col md:flex-row md:items-end gap-3.5 mb-4 p-4 bg-bg1 border border-border rounded-[var(--radius-lg)]">
+          <div class="md:flex-[1.4]">
+            <QFSelect
+              v-model="selectedSubject"
+              label="Tag uploads to subject"
+              :options="subjectOptions"
+            />
+          </div>
+          <div class="md:flex-1">
+            <QFInput
+              v-model="examYear"
+              label="Exam year"
+              placeholder="e.g. 2023 or 2022 Spring"
+            />
+          </div>
+          <div class="text-xs text-text3 md:pb-2.5 md:flex-1">
+            Subject scopes extracted units; year labels the paper for analytics.
+          </div>
+        </div>
+
         <div
           :class="['qf-dropzone', dragover && 'dragover']"
           style="margin-bottom: 24px"
@@ -155,6 +193,8 @@ const pipeline = [
                   <div style="font-weight: 500; font-size: 13.5px; margin-bottom: 2px">{{ f.name }}</div>
                   <div style="font-size: 12px; color: var(--text3); display: flex; gap: 8px">
                     <span>{{ f.size }}</span>
+                    <span>· {{ f.subject }}</span>
+                    <span>· Year {{ f.year }}</span>
                     <span v-if="f.questions">· {{ f.questions }} questions extracted</span>
                   </div>
                 </div>
@@ -165,7 +205,7 @@ const pipeline = [
                   v-if="f.status === 'review'"
                   variant="ai"
                   size="sm"
-                  @click="router.push('/admin/review')"
+                  @click="openReview(f)"
                 >Review →</QFButton>
               </div>
               <div v-if="f.status === 'processing'" style="margin-left: 48px">
@@ -193,10 +233,10 @@ const pipeline = [
         </QFCard>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 16px">
+      <div class="flex flex-col gap-4">
         <QFCard>
           <div class="qf-card-body">
-            <div style="font-family: var(--font-head); font-weight: 600; margin-bottom: 14px">
+            <div class="font-head font-semibold mb-3.5">
               Processing Pipeline
             </div>
             <div

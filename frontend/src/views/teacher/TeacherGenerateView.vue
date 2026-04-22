@@ -50,15 +50,27 @@ const startGeneration = () => {
 };
 
 const letter = (i: number) => String.fromCharCode(65 + i);
+
+const unitBreakdown = (bp: Blueprint) =>
+  Object.entries(bp.unitRules)
+    .filter(([, active]) => active)
+    .map(([unit]) => {
+      const allocs = bp.unitAllocations?.[unit] ?? [];
+      const qs = allocs.reduce((s, a) => s + (a.count || 0), 0);
+      const marks = allocs.reduce((s, a) => s + (a.count || 0) * (a.marks || 0), 0);
+      return { unit, qs, marks, allocs };
+    });
 </script>
 
 <template>
-  <div class="qf-content qf-anim-in" style="max-width: 860px">
+  <div class="qf-content qf-anim-in">
     <QFPageHeader
       title="Generate Question Paper"
       :subtitle="selectedBP ? `Blueprint: ${selectedBP.name} · ${selectedBP.subject} · ${selectedBP.totalMarks} marks` : 'Select a blueprint to get started'"
-      back="Dashboard"
-      @back="router.push('/teacher')"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/teacher' },
+        { label: 'Generate Paper' },
+      ]"
     />
 
     <div style="margin-bottom: 24px">
@@ -117,7 +129,7 @@ const letter = (i: number) => String.fromCharCode(65 + i);
 
       <div
         v-else
-        style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px"
+        class="grid grid-cols-1 md:grid-cols-2 gap-3.5 mb-5"
       >
         <div
           v-for="bp in blueprints"
@@ -180,6 +192,52 @@ const letter = (i: number) => String.fromCharCode(65 + i);
             >
               <span style="color: var(--cyan); font-weight: 700; font-family: var(--font-mono)">{{ letter(i) }}</span>
               <span>{{ s.count }} {{ s.type }} ({{ s.marksEach }}M each)</span>
+            </div>
+          </div>
+          <div
+            v-if="unitBreakdown(bp).length"
+            style="
+              background: var(--bg2);
+              border-radius: 8px;
+              padding: 8px 10px;
+              margin-bottom: 10px;
+              display: flex;
+              flex-direction: column;
+              gap: 4px;
+            "
+          >
+            <div
+              style="
+                font-size: 10.5px;
+                color: var(--text3);
+                font-weight: 600;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+              "
+            >Unit Allocation</div>
+            <div
+              v-for="row in unitBreakdown(bp)"
+              :key="row.unit"
+              style="display: flex; align-items: center; gap: 6px; font-size: 11.5px"
+            >
+              <span style="color: var(--indigo); font-weight: 600">{{ row.unit }}</span>
+              <span
+                v-if="row.qs === 0"
+                style="color: var(--text3); font-style: italic; font-size: 11px"
+              >no allocation</span>
+              <span
+                v-else
+                style="
+                  margin-left: auto;
+                  font-family: var(--font-mono);
+                  color: var(--text2);
+                  font-size: 11px;
+                "
+              >
+                <template v-for="(a, ai) in row.allocs" :key="ai">
+                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>{{ a.count }}×{{ a.marks }}M
+                </template>
+              </span>
             </div>
           </div>
           <div
@@ -249,6 +307,54 @@ const letter = (i: number) => String.fromCharCode(65 + i);
               "
             >{{ item.value }}</div>
             <div style="font-size: 11.5px; color: var(--text3); margin-top: 2px">{{ item.label }}</div>
+          </div>
+        </div>
+        <div
+          v-if="selectedBP && unitBreakdown(selectedBP).length"
+          style="
+            background: var(--bg2);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            margin: 0 auto 24px;
+            max-width: 520px;
+            text-align: left;
+          "
+        >
+          <div
+            style="
+              font-size: 11px;
+              color: var(--text3);
+              font-weight: 600;
+              letter-spacing: 0.04em;
+              text-transform: uppercase;
+              margin-bottom: 8px;
+            "
+          >Unit Allocation</div>
+          <div style="display: flex; flex-direction: column; gap: 5px">
+            <div
+              v-for="row in unitBreakdown(selectedBP)"
+              :key="row.unit"
+              style="display: flex; align-items: center; gap: 10px; font-size: 12.5px"
+            >
+              <span style="color: var(--indigo); font-weight: 600; min-width: 70px">{{ row.unit }}</span>
+              <span
+                v-if="row.qs === 0"
+                style="color: var(--text3); font-style: italic"
+              >no allocation</span>
+              <span
+                v-else
+                style="
+                  margin-left: auto;
+                  font-family: var(--font-mono);
+                  color: var(--text2);
+                "
+              >
+                <template v-for="(a, ai) in row.allocs" :key="ai">
+                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>{{ a.count }}×{{ a.marks }}M
+                </template>
+                <span style="color: var(--text3); margin-left: 8px">= {{ row.qs }}Q / {{ row.marks }}M</span>
+              </span>
+            </div>
           </div>
         </div>
         <div style="display: flex; gap: 10px; justify-content: center">
@@ -335,27 +441,19 @@ const letter = (i: number) => String.fromCharCode(65 + i);
       class="qf-anim-in"
       style="display: flex; flex-direction: column; gap: 16px"
     >
-      <div
-        style="
-          background: var(--success-dim);
-          border: 1px solid var(--success);
-          border-radius: var(--radius-lg);
-          padding: 16px 20px;
-          display: flex;
-          gap: 12px;
-          align-items: center;
-        "
-      >
-        <span style="font-size: 24px">✓</span>
-        <div>
-          <div style="font-weight: 600; color: var(--success); margin-bottom: 2px">
-            Paper generated successfully
-          </div>
-          <div style="font-size: 13px; color: var(--text2)">
-            All 6 constraints satisfied · 1 AI-assisted question pending review
+      <div class="bg-success-dim border border-success rounded-[var(--radius-lg)] p-4 sm:px-5 flex flex-col sm:flex-row gap-3 sm:items-center">
+        <div class="flex gap-3 items-center flex-1">
+          <span class="text-2xl">✓</span>
+          <div>
+            <div class="font-semibold text-success mb-[2px]">
+              Paper generated successfully
+            </div>
+            <div class="text-[13px] text-text2">
+              All 6 constraints satisfied · 1 AI-assisted question pending review
+            </div>
           </div>
         </div>
-        <div style="margin-left: auto; display: flex; gap: 8px">
+        <div class="flex flex-wrap gap-2 sm:ml-auto">
           <QFButton variant="secondary" @click="router.push(`/teacher/paper/${papersStore.list[0]?.id}`)">
             Preview Paper
           </QFButton>
@@ -365,9 +463,10 @@ const letter = (i: number) => String.fromCharCode(65 + i);
         </div>
       </div>
       <QFCard>
-        <div class="qf-card-header" style="padding-bottom: 14px">
-          <span style="font-family: var(--font-head); font-weight: 600">Constraint Report</span>
+        <div class="qf-card-header pb-3.5">
+          <span class="font-head font-semibold">Constraint Report</span>
         </div>
+        <div class="qf-table-wrap">
         <table class="qf-table">
           <thead>
             <tr>
@@ -390,6 +489,7 @@ const letter = (i: number) => String.fromCharCode(65 + i);
             </tr>
           </tbody>
         </table>
+        </div>
       </QFCard>
     </div>
   </div>

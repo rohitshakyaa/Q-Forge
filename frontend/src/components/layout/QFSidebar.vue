@@ -11,7 +11,10 @@ const props = defineProps<{
   userName?: string;
 }>();
 
-const emit = defineEmits<{ logout: [] }>();
+const emit = defineEmits<{
+  logout: [];
+  navigate: [];
+}>();
 
 const route = useRoute();
 const sections = navigationByRole[props.role];
@@ -34,6 +37,10 @@ const handleSignOut = () => {
   emit('logout');
 };
 
+const handleNavigate = () => {
+  emit('navigate');
+};
+
 const onDocumentClick = (event: MouseEvent) => {
   if (!menuRef.value) return;
   if (!menuRef.value.contains(event.target as Node)) {
@@ -49,44 +56,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="qf-sidebar">
-    <div
-      style="
-        padding: 8px 20px 16px;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 8px;
-      "
-    >
-      <div style="display: flex; align-items: center; gap: 8px">
+  <aside class="qf-sidebar">
+    <div class="px-5 pt-2 pb-4 border-b border-border mb-2">
+      <div class="flex items-center gap-2">
         <div
-          style="
-            width: 28px;
-            height: 28px;
-            background: linear-gradient(135deg, var(--cyan), var(--indigo));
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            font-weight: 700;
-            color: #070a10;
-            font-family: var(--font-head);
-          "
+          class="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-bold font-head text-bg"
+          style="background: linear-gradient(135deg, var(--cyan), var(--indigo))"
         >
           Q
         </div>
-        <span
-          style="
-            font-family: var(--font-head);
-            font-size: 16px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-          "
-        >
-          QForge
-        </span>
+        <span class="font-head text-base font-bold tracking-tight">QForge</span>
       </div>
-      <div style="margin-top: 8px">
+      <div class="mt-2">
         <QFBadge :variant="role === 'admin' ? 'cyan' : 'indigo'">
           {{ role === 'admin' ? 'Administrator' : 'Teacher' }}
         </QFBadge>
@@ -100,96 +81,49 @@ onBeforeUnmount(() => {
         :key="item.path"
         :to="item.path"
         :class="['qf-nav-item', isActive(item.path) && 'active']"
+        @click="handleNavigate"
       >
-        <span style="font-size: 16px">{{ item.icon }}</span>
+        <span class="text-base">{{ item.icon }}</span>
         <span>{{ item.title }}</span>
         <span v-if="item.badge" class="qf-nav-badge">{{ item.badge }}</span>
       </RouterLink>
     </div>
 
-    <div style="flex-grow: 1" />
+    <div class="grow" />
     <div
       ref="menuRef"
-      style="
-        position: relative;
-        padding: 12px 8px;
-        border-top: 1px solid var(--border);
-        margin-top: 8px;
-      "
+      class="relative px-2 py-3 border-t border-border mt-2"
     >
       <button
         type="button"
-        class="qf-nav-item"
-        style="
-          gap: 10px;
-          width: 100%;
-          background: transparent;
-          border: none;
-          text-align: left;
-          cursor: pointer;
-          font: inherit;
-          color: inherit;
-        "
+        class="qf-nav-item w-full bg-transparent border-none text-left cursor-pointer"
+        style="font: inherit; color: inherit;"
         @click="toggleMenu"
       >
         <QFAvatar :name="userName ?? 'User'" :size="24" />
-        <div style="min-width: 0; flex: 1">
-          <div
-            style="
-              font-size: 13px;
-              font-weight: 500;
-              color: var(--text);
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-            "
-          >
+        <div class="min-w-0 flex-1">
+          <div class="text-[13px] font-medium text-text overflow-hidden text-ellipsis whitespace-nowrap">
             {{ userName ?? 'Profile & Settings' }}
           </div>
         </div>
-        <span style="color: var(--text3); font-size: 12px">{{ menuOpen ? '▾' : '▴' }}</span>
+        <span class="text-text3 text-xs">{{ menuOpen ? '▾' : '▴' }}</span>
       </button>
 
       <div
         v-if="menuOpen"
-        style="
-          position: absolute;
-          left: 8px;
-          right: 8px;
-          bottom: calc(100% - 4px);
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
-          padding: 4px;
-          z-index: 20;
-        "
+        class="absolute left-2 right-2 bg-bg2 border border-border rounded-lg p-1 z-20"
+        style="bottom: calc(100% - 4px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);"
       >
         <button
           type="button"
-          style="
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            width: 100%;
-            padding: 8px 10px;
-            background: transparent;
-            border: none;
-            border-radius: 6px;
-            color: var(--text);
-            font: inherit;
-            font-size: 13px;
-            cursor: pointer;
-            text-align: left;
-          "
-          @mouseenter="(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--surface-2, rgba(255,255,255,0.04))')"
-          @mouseleave="(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')"
+          class="flex items-center gap-2 w-full px-2.5 py-2 bg-transparent border-none rounded-md text-text text-[13px] cursor-pointer text-left hover:bg-bg3 transition-colors"
+          style="font: inherit;"
           @click="handleSignOut"
         >
-          <span style="font-size: 14px">⎋</span>
+          <span class="text-sm">⎋</span>
           <span>Sign out</span>
         </button>
       </div>
     </div>
-  </div>
+  </aside>
 </template>

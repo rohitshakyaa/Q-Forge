@@ -41,8 +41,11 @@ const onAltHover = (e: MouseEvent, enter: boolean) => {
     <QFPageHeader
       :title="paper.name"
       :subtitle="`${paper.subject} · ${paper.marks} marks · ${paper.duration} minutes · Generated ${paper.date}`"
-      back="Generate"
-      @back="router.push('/teacher/generate')"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/teacher' },
+        { label: 'Generate', to: '/teacher/generate' },
+        { label: paper.name },
+      ]"
     >
       <template #actions>
         <QFButton variant="ghost" size="sm" @click="editMode = !editMode">

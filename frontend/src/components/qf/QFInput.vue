@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = withDefaults(
+withDefaults(
   defineProps<{
     modelValue?: string | number;
     label?: string;
@@ -55,6 +55,6 @@ const onInput = (e: Event) => {
       :disabled="disabled"
       @input="onInput"
     />
-    <span v-if="hint" style="font-size: 12px; color: var(--text3)">{{ hint }}</span>
+    <span v-if="hint" class="text-xs text-text3">{{ hint }}</span>
   </div>
 </template>

@@ -16,10 +16,10 @@ withDefaults(
   <div>
     <div
       v-if="label"
-      style="display: flex; justify-content: space-between; margin-bottom: 6px"
+      class="flex justify-between mb-1.5"
     >
-      <span style="font-size: 12.5px; color: var(--text2)">{{ label }}</span>
-      <span style="font-size: 12px; color: var(--text3); font-family: var(--font-mono)">{{ value }}%</span>
+      <span class="text-[12.5px] text-text2">{{ label }}</span>
+      <span class="text-xs text-text3 font-mono">{{ value }}%</span>
     </div>
     <div class="qf-progress-track">
       <div :class="['qf-progress-bar', ai && 'ai']" :style="{ width: `${value}%` }" />

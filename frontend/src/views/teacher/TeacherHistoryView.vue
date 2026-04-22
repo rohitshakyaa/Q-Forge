@@ -16,9 +16,17 @@ const analytics: Array<[string, string]> = [
 
 <template>
   <div class="qf-content qf-anim-in">
-    <QFPageHeader title="Paper History" subtitle="All generated papers and export records" />
-    <div style="display: grid; grid-template-columns: 1fr 280px; gap: 20px">
+    <QFPageHeader
+      title="Paper History"
+      subtitle="All generated papers and export records"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/teacher' },
+        { label: 'Paper History' },
+      ]"
+    />
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
       <QFCard>
+        <div class="qf-table-wrap">
         <table class="qf-table">
           <thead>
             <tr>
@@ -48,8 +56,9 @@ const analytics: Array<[string, string]> = [
             </tr>
           </tbody>
         </table>
+        </div>
       </QFCard>
-      <div style="display: flex; flex-direction: column; gap: 14px">
+      <div class="flex flex-col gap-3.5">
         <QFCard>
           <div class="qf-card-body">
             <div style="font-family: var(--font-head); font-weight: 600; margin-bottom: 14px">

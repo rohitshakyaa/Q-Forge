@@ -39,6 +39,15 @@ const confirmDelete = () => {
 
 const letter = (i: number) => String.fromCharCode(65 + i);
 
+const unitBreakdown = (bp: Blueprint) =>
+  Object.entries(bp.unitRules)
+    .filter(([, active]) => active)
+    .map(([unit]) => {
+      const allocs = bp.unitAllocations?.[unit] ?? [];
+      const qs = allocs.reduce((s, a) => s + (a.count || 0), 0);
+      return { unit, qs, allocs };
+    });
+
 const setDashedHover = (e: MouseEvent, enter: boolean) => {
   const el = e.currentTarget as HTMLElement;
   el.style.borderColor = enter ? 'var(--cyan)' : 'var(--border)';
@@ -51,6 +60,10 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
     <QFPageHeader
       title="Blueprint Builder"
       subtitle="Create and manage your paper structure templates"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/teacher' },
+        { label: 'Blueprint Builder' },
+      ]"
     >
       <template #actions>
         <QFButton variant="primary" @click="newBlueprint">+ New Blueprint</QFButton>
@@ -163,6 +176,53 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
               <span
                 style="margin-left: auto; font-family: var(--font-mono); color: var(--text3); font-size: 11px"
               >{{ s.count }}×{{ s.marksEach }}M</span>
+            </div>
+          </div>
+
+          <div
+            v-if="unitBreakdown(bp).length"
+            style="
+              background: var(--bg2);
+              border-radius: 8px;
+              padding: 8px 10px;
+              margin-bottom: 10px;
+              display: flex;
+              flex-direction: column;
+              gap: 4px;
+            "
+          >
+            <div
+              style="
+                font-size: 10.5px;
+                color: var(--text3);
+                font-weight: 600;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+              "
+            >Unit Allocation</div>
+            <div
+              v-for="row in unitBreakdown(bp)"
+              :key="row.unit"
+              style="display: flex; align-items: center; gap: 6px; font-size: 11.5px"
+            >
+              <span style="color: var(--indigo); font-weight: 600">{{ row.unit }}</span>
+              <span
+                v-if="row.qs === 0"
+                style="color: var(--text3); font-style: italic; font-size: 11px"
+              >no allocation</span>
+              <span
+                v-else
+                style="
+                  margin-left: auto;
+                  font-family: var(--font-mono);
+                  color: var(--text2);
+                  font-size: 11px;
+                "
+              >
+                <template v-for="(a, ai) in row.allocs" :key="ai">
+                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>{{ a.count }}×{{ a.marks }}M
+                </template>
+              </span>
             </div>
           </div>
 

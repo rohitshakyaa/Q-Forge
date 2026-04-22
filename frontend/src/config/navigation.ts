@@ -21,7 +21,7 @@ export const navigationByRole: Record<UserRole, NavSection[]> = {
     {
       label: 'Content',
       items: [
-        { title: 'PDF Upload', path: '/admin/upload', icon: '⬆', badge: '2' },
+        { title: 'Past Papers', path: '/admin/upload', icon: '⬆', badge: '2' },
         { title: 'Review Queue', path: '/admin/review', icon: '◈', badge: '3' },
         { title: 'Question Bank', path: '/admin/bank', icon: '◉' },
       ],

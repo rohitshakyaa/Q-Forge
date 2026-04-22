@@ -7,6 +7,7 @@ import {
   QFButton,
   QFCard,
   QFInput,
+  QFPageHeader,
   QFSelect,
   QFSteps,
 } from '../../components/qf';
@@ -24,6 +25,11 @@ const bp = reactive<Blueprint>(
 );
 const isNew = !existing;
 
+if (!bp.unitAllocations) bp.unitAllocations = {};
+for (const u of Object.keys(bp.unitRules)) {
+  if (!bp.unitAllocations[u]) bp.unitAllocations[u] = [];
+}
+
 const steps = ['Basics', 'Sections', 'Unit Rules', 'Constraints', 'Review'];
 const step = reactive({ current: 0 });
 
@@ -31,6 +37,53 @@ const totalAssigned = computed(() => bp.sections.reduce((s, sec) => s + sec.coun
 const deficit = computed(() => bp.totalMarks - totalAssigned.value);
 const totalQuestions = computed(() => bp.sections.reduce((s, sec) => s + sec.count, 0));
 const unitsRequired = computed(() => Object.values(bp.unitRules).filter(Boolean).length);
+
+const availableMarks = computed(() => {
+  const set = new Set<number>();
+  for (const s of bp.sections) set.add(s.marksEach);
+  return Array.from(set).sort((a, b) => a - b);
+});
+
+const unitTotal = (unit: string) =>
+  (bp.unitAllocations[unit] ?? []).reduce((s, a) => s + (a.count || 0), 0);
+
+const unitMarks = (unit: string) =>
+  (bp.unitAllocations[unit] ?? []).reduce((s, a) => s + (a.count || 0) * (a.marks || 0), 0);
+
+const totalAllocatedQs = computed(() =>
+  Object.entries(bp.unitAllocations)
+    .filter(([u]) => bp.unitRules[u])
+    .reduce((s, [, arr]) => s + arr.reduce((x, a) => x + (a.count || 0), 0), 0),
+);
+
+const allocationDeficit = computed(() => totalQuestions.value - totalAllocatedQs.value);
+
+const allocationColor = computed(() => {
+  if (allocationDeficit.value === 0) return { bg: 'var(--success-dim)', fg: 'var(--success)' };
+  if (allocationDeficit.value > 0) return { bg: 'var(--warn-dim)', fg: 'var(--warn)' };
+  return { bg: 'var(--danger-dim)', fg: 'var(--danger)' };
+});
+
+const addAllocation = (unit: string) => {
+  const firstMark = availableMarks.value[0] ?? 5;
+  bp.unitAllocations[unit].push({ marks: firstMark, count: 1 });
+};
+
+const removeAllocation = (unit: string, idx: number) => {
+  bp.unitAllocations[unit].splice(idx, 1);
+};
+
+const setAllocationCount = (unit: string, idx: number, raw: number) => {
+  const current = bp.unitAllocations[unit][idx];
+  const requested = Math.max(0, Math.floor(raw || 0));
+  const othersTotal = totalAllocatedQs.value - (current.count || 0);
+  const remaining = Math.max(0, totalQuestions.value - othersTotal);
+  current.count = Math.min(requested, remaining);
+};
+
+const setAllocationMarks = (unit: string, idx: number, raw: string | number) => {
+  bp.unitAllocations[unit][idx].marks = +raw || 0;
+};
 
 const subjectOptions = [
   { value: 'CS301', label: 'CS301 – Data Structures' },
@@ -84,6 +137,26 @@ const next = () => {
   step.current += 1;
 };
 
+const canContinue = computed(() => {
+  if (step.current === 1) return deficit.value === 0;
+  if (step.current === 2) return allocationDeficit.value === 0;
+  return true;
+});
+
+const continueBlockedReason = computed(() => {
+  if (step.current === 1 && deficit.value !== 0) {
+    return deficit.value > 0
+      ? `Allocate ${deficit.value} more mark${deficit.value === 1 ? '' : 's'} to continue`
+      : `Over-allocated by ${-deficit.value} marks — reduce to continue`;
+  }
+  if (step.current === 2 && allocationDeficit.value !== 0) {
+    return allocationDeficit.value > 0
+      ? `Allocate ${allocationDeficit.value} more question${allocationDeficit.value === 1 ? '' : 's'} to continue`
+      : `Over-allocated by ${-allocationDeficit.value} questions — reduce to continue`;
+  }
+  return '';
+});
+
 const exclusionRules = [
   {
     label: 'Last N Papers Exclusion',
@@ -107,14 +180,16 @@ const exclusionRules = [
 </script>
 
 <template>
-  <div class="qf-content qf-anim-in" style="max-width: 900px">
+  <div class="qf-content qf-anim-in">
     <div class="qf-anim-in">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px">
-        <div style="font-family: var(--font-head); font-weight: 700; font-size: 18px">
-          {{ isNew ? 'New Blueprint' : `Editing: ${bp.name}` }}
-        </div>
-        <QFButton variant="ghost" size="sm" @click="cancel">← Back to list</QFButton>
-      </div>
+      <QFPageHeader
+        :title="isNew ? 'New Blueprint' : `Editing: ${bp.name}`"
+        :breadcrumbs="[
+          { label: 'Dashboard', to: '/teacher' },
+          { label: 'Blueprints', to: '/teacher/blueprint' },
+          { label: isNew ? 'New Blueprint' : bp.name },
+        ]"
+      />
       <div style="margin-bottom: 24px">
         <QFSteps :steps="steps" :current="step.current" />
       </div>
@@ -124,7 +199,7 @@ const exclusionRules = [
           <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px; margin-bottom: 18px">
             Paper Basics
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <QFInput v-model="bp.name" label="Blueprint name *" placeholder='"Midterm Paper Template"' />
             <QFSelect v-model="bp.subject" label="Subject *" :options="subjectOptions" />
             <QFInput
@@ -216,13 +291,7 @@ const exclusionRules = [
                   "
                 >{{ letter(si) }}</div>
                 <div
-                  style="
-                    flex: 1;
-                    display: grid;
-                    grid-template-columns: 1fr 1fr 100px 100px;
-                    gap: 12px;
-                    align-items: end;
-                  "
+                  class="flex-1 grid grid-cols-2 lg:grid-cols-[1fr_1fr_100px_100px] gap-3 items-end"
                 >
                   <QFInput v-model="sec.name" label="Section name" />
                   <QFSelect v-model="sec.type" label="Question type" :options="typeOptions" />
@@ -278,61 +347,160 @@ const exclusionRules = [
         </div>
       </div>
 
-      <QFCard v-else-if="step.current === 2" class="qf-anim-in">
-        <div class="qf-card-body">
-          <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px; margin-bottom: 4px">
-            Unit Coverage Rules
-          </div>
-          <div style="color: var(--text3); font-size: 13px; margin-bottom: 18px">
-            Select which units must be covered in the generated paper
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px">
-            <div
-              v-for="(active, unit) in bp.unitRules"
-              :key="unit"
-              :style="{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '12px 16px',
-                background: active ? 'var(--cyan-dim)' : 'var(--bg2)',
-                border: `1.5px solid ${active ? 'var(--cyan)' : 'var(--border)'}`,
-                borderRadius: 'var(--radius)',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-              }"
-              @click="toggleUnit(unit)"
-            >
-              <div
-                :style="{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '4px',
-                  background: active ? 'var(--cyan)' : 'var(--bg3)',
-                  border: `1.5px solid ${active ? 'var(--cyan)' : 'var(--border2)'}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '12px',
-                  color: '#070a10',
-                  flexShrink: 0,
-                }"
-              >{{ active ? '✓' : '' }}</div>
-              <span
-                :style="{
-                  fontSize: '13.5px',
-                  fontWeight: 500,
-                  color: active ? 'var(--text)' : 'var(--text2)',
-                }"
-              >{{ unit }}</span>
-              <QFBadge v-if="active" variant="cyan" style="margin-left: auto; font-size: 11px">Required</QFBadge>
+      <div v-else-if="step.current === 2" class="qf-anim-in">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px">
+          <div>
+            <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px">
+              Unit Coverage & Allocation
+            </div>
+            <div style="color: var(--text3); font-size: 12.5px; margin-top: 2px">
+              Toggle units and set how many questions of each marks value come from each
             </div>
           </div>
+          <div
+            :style="{
+              fontSize: '13px',
+              padding: '6px 14px',
+              background: allocationColor.bg,
+              color: allocationColor.fg,
+              borderRadius: 'var(--radius)',
+              fontFamily: 'var(--font-mono)',
+              fontWeight: 600,
+            }"
+          >
+            {{ totalAllocatedQs }}/{{ totalQuestions }} questions
+          </div>
+        </div>
+
+        <div v-if="availableMarks.length === 0" style="margin-bottom: 12px">
           <QFAIHint>
-            <strong style="color: var(--ai)">Tip:</strong> Including all units is recommended for final exams. For quizzes, select 2–3 focused units.
+            Add at least one section in the previous step to unlock unit allocations.
           </QFAIHint>
         </div>
-      </QFCard>
+        <div v-else-if="allocationDeficit !== 0" style="margin-bottom: 12px">
+          <QFAIHint>
+            {{ allocationDeficit > 0
+              ? `${allocationDeficit} question${allocationDeficit === 1 ? '' : 's'} still to be allocated across units.`
+              : `Over-allocated by ${-allocationDeficit} questions.` }}
+          </QFAIHint>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <QFCard v-for="(active, unit) in bp.unitRules" :key="unit">
+            <div class="qf-card-body">
+              <div
+                style="display: flex; align-items: center; gap: 12px; cursor: pointer"
+                @click="toggleUnit(unit)"
+              >
+                <div
+                  :style="{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '4px',
+                    background: active ? 'var(--cyan)' : 'var(--bg3)',
+                    border: `1.5px solid ${active ? 'var(--cyan)' : 'var(--border2)'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '12px',
+                    color: '#070a10',
+                    flexShrink: 0,
+                  }"
+                >{{ active ? '✓' : '' }}</div>
+                <span
+                  :style="{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: active ? 'var(--text)' : 'var(--text2)',
+                  }"
+                >{{ unit }}</span>
+                <QFBadge v-if="active" variant="cyan" style="font-size: 11px">Required</QFBadge>
+                <span
+                  v-if="active"
+                  style="
+                    margin-left: auto;
+                    font-family: var(--font-mono);
+                    font-size: 12.5px;
+                    color: var(--text2);
+                  "
+                >
+                  {{ unitTotal(unit) }} Qs · {{ unitMarks(unit) }} marks
+                </span>
+              </div>
+
+              <div
+                v-if="active"
+                style="
+                  margin-top: 14px;
+                  padding-top: 14px;
+                  border-top: 1px dashed var(--border);
+                  display: flex;
+                  flex-direction: column;
+                  gap: 8px;
+                "
+              >
+                <div
+                  v-if="bp.unitAllocations[unit].length === 0"
+                  style="color: var(--text3); font-size: 12.5px; font-style: italic"
+                >
+                  No questions allocated yet.
+                </div>
+                <div
+                  v-for="(alloc, idx) in bp.unitAllocations[unit]"
+                  :key="idx"
+                  class="grid grid-cols-[1fr_1fr_auto] gap-2.5 items-end"
+                >
+                  <QFSelect
+                    :model-value="String(alloc.marks)"
+                    label="Marks each"
+                    :options="availableMarks.map((m) => ({ value: String(m), label: `${m} marks` }))"
+                    @update:model-value="(v) => setAllocationMarks(unit, idx, v)"
+                  />
+                  <QFInput
+                    :model-value="alloc.count"
+                    label="No. of questions"
+                    type="number"
+                    @update:model-value="(v) => setAllocationCount(unit, idx, +v)"
+                  />
+                  <button
+                    style="
+                      background: none;
+                      border: 1px solid var(--border);
+                      color: var(--text3);
+                      cursor: pointer;
+                      font-size: 16px;
+                      height: 38px;
+                      width: 38px;
+                      border-radius: var(--radius);
+                    "
+                    @click="removeAllocation(unit, idx)"
+                  >×</button>
+                </div>
+                <div>
+                  <QFButton
+                    variant="secondary"
+                    size="sm"
+                    :disabled="availableMarks.length === 0 || allocationDeficit <= 0"
+                    @click="addAllocation(unit)"
+                  >+ Add row</QFButton>
+                  <span
+                    v-if="allocationDeficit <= 0 && availableMarks.length > 0"
+                    style="margin-left: 10px; color: var(--text3); font-size: 12px"
+                  >All questions allocated.</span>
+                </div>
+              </div>
+            </div>
+          </QFCard>
+        </div>
+
+        <div style="margin-top: 14px">
+          <QFAIHint>
+            <strong style="color: var(--ai)">Tip:</strong> Distribute the paper's
+            {{ totalQuestions }} question{{ totalQuestions === 1 ? '' : 's' }} across required units.
+            Mark values come from the sections you defined.
+          </QFAIHint>
+        </div>
+      </div>
 
       <QFCard v-else-if="step.current === 3" class="qf-anim-in">
         <div class="qf-card-body">
@@ -410,7 +578,7 @@ const exclusionRules = [
           <div style="color: var(--text3); font-size: 13px; margin-bottom: 18px">
             {{ bp.subject }} · {{ bp.totalMarks }} marks · {{ bp.duration }} min
           </div>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-[18px]">
             <div
               v-for="summary in [
                 { label: 'Total Qs', value: totalQuestions, icon: '◈', color: 'var(--cyan)' },
@@ -466,15 +634,20 @@ const exclusionRules = [
         </div>
       </QFCard>
 
-      <div style="display: flex; justify-content: space-between; margin-top: 20px">
+      <div style="display: flex; justify-content: space-between; margin-top: 20px; align-items: center">
         <QFButton variant="secondary" @click="back">
           {{ step.current === 0 ? '← Cancel' : '← Back' }}
         </QFButton>
-        <div style="display: flex; gap: 8px">
+        <div style="display: flex; gap: 10px; align-items: center">
+          <span
+            v-if="continueBlockedReason"
+            style="font-size: 12.5px; color: var(--warn); font-family: var(--font-mono)"
+          >{{ continueBlockedReason }}</span>
           <QFButton variant="ghost" @click="cancel">Discard</QFButton>
           <QFButton
             v-if="step.current < steps.length - 1"
             variant="primary"
+            :disabled="!canContinue"
             @click="next"
           >Continue →</QFButton>
           <QFButton v-else variant="primary" @click="save">Save Blueprint</QFButton>

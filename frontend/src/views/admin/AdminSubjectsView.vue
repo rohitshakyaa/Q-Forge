@@ -52,6 +52,10 @@ const totalQuestions = (s: Subject) => s.units.flatMap((u) => u.questions).lengt
     <QFPageHeader
       title="Subjects & Units"
       subtitle="Manage academic subjects, units, questions, and syllabi"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/admin' },
+        { label: 'Subjects & Units' },
+      ]"
     >
       <template #actions>
         <QFButton variant="primary" @click="showAdd = true">+ New Subject</QFButton>
@@ -161,8 +165,8 @@ const totalQuestions = (s: Subject) => s.units.flatMap((u) => u.questions).lengt
     </div>
 
     <QFModal :open="showAdd" title="New Subject" :width="460" @close="showAdd = false">
-      <div style="display: flex; flex-direction: column; gap: 14px">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+      <div class="flex flex-col gap-3.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <QFInput v-model="newSubj.code" label="Subject code *" placeholder="e.g. CS304" />
           <QFInput v-model="newSubj.name" label="Subject name *" placeholder="e.g. Operating Systems" />
         </div>

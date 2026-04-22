@@ -4,13 +4,15 @@ import { useRouter } from 'vue-router';
 import { QFBadge, QFButton, QFPageHeader } from '../../components/qf';
 import { useBlueprintsStore } from '../../stores/blueprints';
 import { usePapersStore } from '../../stores/papers';
+import { useCatalogStore } from '../../stores/catalog';
 
 const router = useRouter();
 const blueprintsStore = useBlueprintsStore();
 const papersStore = usePapersStore();
+const catalogStore = useCatalogStore();
 
 const quickActions = [
-  { icon: '⬡', label: 'New Blueprint', desc: 'Define paper structure and rules', color: 'var(--cyan)', to: '/teacher/blueprint' },
+  { icon: '⬡', label: 'Blueprints', desc: 'Browse and manage paper templates', color: 'var(--cyan)', to: '/teacher/blueprint' },
   { icon: '✦', label: 'Generate Paper', desc: 'From an existing blueprint', color: 'var(--indigo)', to: '/teacher/generate' },
   { icon: '◉', label: 'Paper History', desc: 'View and re-export past papers', color: 'var(--violet)', to: '/teacher/history' },
 ];
@@ -21,8 +23,57 @@ const statusMap: Record<string, { variant: 'success' | 'indigo' | 'neutral'; lab
   draft: { variant: 'neutral', label: 'Draft' },
 };
 
-const recentPapers = computed(() => papersStore.list.slice(0, 3));
-const blueprints = computed(() => blueprintsStore.list.slice(0, 3));
+const recentPapers = computed(() => papersStore.list.slice(0, 4));
+
+const stats = computed(() => {
+  const papers = papersStore.list;
+  const totalExports = papers.reduce((s, p) => s + p.exports, 0);
+  const totalMarks = papers.reduce((s, p) => s + p.marks, 0);
+  return {
+    papers: papers.length,
+    blueprints: blueprintsStore.list.length,
+    questions: catalogStore.questionBank.length,
+    subjects: catalogStore.subjects.length,
+    exports: totalExports,
+    marks: totalMarks,
+  };
+});
+
+const subjectBreakdown = computed(() => {
+  const map = new Map<string, { subject: string; count: number; marks: number }>();
+  for (const p of papersStore.list) {
+    const cur = map.get(p.subject) ?? { subject: p.subject, count: 0, marks: 0 };
+    cur.count += 1;
+    cur.marks += p.marks;
+    map.set(p.subject, cur);
+  }
+  const arr = [...map.values()].sort((a, b) => b.count - a.count);
+  const max = Math.max(1, ...arr.map((r) => r.count));
+  return arr.map((r) => ({ ...r, pct: Math.round((r.count / max) * 100) }));
+});
+
+const statusBreakdown = computed(() => {
+  const counts: Record<'exported' | 'saved' | 'draft', number> = { exported: 0, saved: 0, draft: 0 };
+  for (const p of papersStore.list) counts[p.status] += 1;
+  const total = Math.max(1, papersStore.list.length);
+  return [
+    { key: 'exported', label: 'Exported', count: counts.exported, pct: Math.round((counts.exported / total) * 100), color: 'var(--success)' },
+    { key: 'saved', label: 'Saved', count: counts.saved, pct: Math.round((counts.saved / total) * 100), color: 'var(--indigo)' },
+    { key: 'draft', label: 'Drafts', count: counts.draft, pct: Math.round((counts.draft / total) * 100), color: 'var(--text3)' },
+  ];
+});
+
+const difficultyBreakdown = computed(() => {
+  const counts: Record<'Easy' | 'Medium' | 'Hard', number> = { Easy: 0, Medium: 0, Hard: 0 };
+  for (const q of catalogStore.questionBank) {
+    if (q.difficulty) counts[q.difficulty] += 1;
+  }
+  return [
+    { label: 'Easy', count: counts.Easy, color: 'var(--success)' },
+    { label: 'Medium', count: counts.Medium, color: 'var(--warn)' },
+    { label: 'Hard', count: counts.Hard, color: 'var(--danger)' },
+  ];
+});
 
 const setHover = (e: MouseEvent, color: string, enter: boolean) => {
   const el = e.currentTarget as HTMLElement;
@@ -34,19 +85,17 @@ const setListHover = (e: MouseEvent, enter: boolean) => {
   const el = e.currentTarget as HTMLElement;
   el.style.borderColor = enter ? 'var(--border2)' : 'var(--border)';
 };
-
-const setDashedHover = (e: MouseEvent, enter: boolean) => {
-  const el = e.currentTarget as HTMLElement;
-  el.style.borderColor = enter ? 'var(--cyan)' : 'var(--border)';
-  el.style.color = enter ? 'var(--cyan)' : 'var(--text3)';
-};
 </script>
 
 <template>
   <div class="qf-content qf-anim-in">
-    <QFPageHeader title="Teacher Dashboard" subtitle="Good morning, Dr. Johnson — ready to generate today's paper?" />
+    <QFPageHeader
+      title="Teacher Dashboard"
+      subtitle="Good morning, Dr. Johnson — ready to generate today's paper?"
+      :breadcrumbs="[{ label: 'Dashboard' }]"
+    />
 
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mb-6">
       <div
         v-for="q in quickActions"
         :key="q.label"
@@ -90,10 +139,34 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
       </div>
     </div>
 
-    <div style="display: grid; grid-template-columns: 1fr 300px; gap: 20px">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5 mb-6">
+      <div class="qf-stat">
+        <div class="qf-stat-label">Papers Created</div>
+        <div class="qf-stat-value">{{ stats.papers }}</div>
+        <div class="qf-stat-sub">{{ stats.marks }} marks total</div>
+      </div>
+      <div class="qf-stat">
+        <div class="qf-stat-label">Blueprints</div>
+        <div class="qf-stat-value">{{ stats.blueprints }}</div>
+        <div class="qf-stat-sub">Templates ready to use</div>
+      </div>
+      <div class="qf-stat">
+        <div class="qf-stat-label">Question Bank</div>
+        <div class="qf-stat-value">{{ stats.questions }}</div>
+        <div class="qf-stat-sub">Across {{ stats.subjects }} subjects</div>
+      </div>
+      <div class="qf-stat">
+        <div class="qf-stat-label">Exports</div>
+        <div class="qf-stat-value">{{ stats.exports }}</div>
+        <div class="qf-stat-sub">All-time downloads</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
       <div>
-        <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px; margin-bottom: 14px">
-          Recent Papers
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px">
+          <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px">Recent Papers</div>
+          <QFButton variant="ghost" size="sm" @click="router.push('/teacher/history')">View all →</QFButton>
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px">
           <div
@@ -111,17 +184,17 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
             @mouseleave="(e) => setListHover(e, false)"
             @click="router.push(`/teacher/paper/${p.id}`)"
           >
-            <div style="display: flex; justify-content: space-between; align-items: flex-start">
-              <div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px">
+              <div style="min-width: 0">
                 <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px">{{ p.name }}</div>
-                <div style="display: flex; gap: 8px; font-size: 12.5px; color: var(--text3)">
+                <div style="display: flex; gap: 8px; font-size: 12.5px; color: var(--text3); flex-wrap: wrap">
                   <span style="color: var(--cyan); font-family: var(--font-mono)">{{ p.subject }}</span>
                   <span>·</span><span>{{ p.questions }} questions</span>
                   <span>·</span><span>{{ p.marks }} marks</span>
                   <span>·</span><span>{{ p.date }}</span>
                 </div>
               </div>
-              <div style="display: flex; gap: 8px; align-items: center">
+              <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0">
                 <QFBadge :variant="statusMap[p.status].variant">{{ statusMap[p.status].label }}</QFBadge>
                 <QFButton
                   variant="ghost"
@@ -136,50 +209,97 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
         </div>
       </div>
 
-      <div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px">
-          <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px">My Blueprints</div>
-          <QFButton variant="ghost" size="sm" @click="router.push('/teacher/blueprint')">+ New</QFButton>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 8px">
-          <div
-            v-for="b in blueprints"
-            :key="b.id"
-            style="
-              background: var(--bg1);
-              border: 1px solid var(--border);
-              border-radius: var(--radius-lg);
-              padding: 12px 16px;
-              cursor: pointer;
-            "
-            @click="router.push('/teacher/generate')"
-          >
-            <div style="font-weight: 600; font-size: 13.5px; margin-bottom: 6px">{{ b.name }}</div>
-            <div style="display: flex; gap: 6px; flex-wrap: wrap">
-              <span class="qf-chip">{{ b.questions }}Q</span>
-              <span class="qf-chip">{{ b.totalMarks }} marks</span>
-              <span class="qf-chip">{{ b.units }} units</span>
+      <div style="display: flex; flex-direction: column; gap: 16px">
+        <div
+          style="
+            background: var(--bg1);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+          "
+        >
+          <div style="font-family: var(--font-head); font-weight: 600; font-size: 14px; margin-bottom: 14px">
+            Papers by Subject
+          </div>
+          <div v-if="subjectBreakdown.length === 0" style="font-size: 12.5px; color: var(--text3)">
+            No papers yet.
+          </div>
+          <div v-else style="display: flex; flex-direction: column; gap: 12px">
+            <div v-for="row in subjectBreakdown" :key="row.subject">
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px">
+                <span style="color: var(--cyan); font-family: var(--font-mono)">{{ row.subject }}</span>
+                <span style="color: var(--text2)">{{ row.count }} paper{{ row.count === 1 ? '' : 's' }}</span>
+              </div>
+              <div style="height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden">
+                <div
+                  :style="{
+                    width: `${row.pct}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, var(--indigo), var(--cyan))',
+                    borderRadius: '3px',
+                  }"
+                />
+              </div>
             </div>
           </div>
-          <div
-            style="
-              border: 2px dashed var(--border);
-              border-radius: var(--radius-lg);
-              padding: 14px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              gap: 8px;
-              cursor: pointer;
-              color: var(--text3);
-              font-size: 13px;
-              transition: all 0.15s;
-            "
-            @mouseenter="(e) => setDashedHover(e, true)"
-            @mouseleave="(e) => setDashedHover(e, false)"
-            @click="router.push('/teacher/blueprint')"
-          >
-            + Create Blueprint
+        </div>
+
+        <div
+          style="
+            background: var(--bg1);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+          "
+        >
+          <div style="font-family: var(--font-head); font-weight: 600; font-size: 14px; margin-bottom: 14px">
+            Paper Status
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <div
+              v-for="s in statusBreakdown"
+              :key="s.key"
+              style="display: flex; align-items: center; gap: 10px"
+            >
+              <span class="qf-dot" :style="{ background: s.color }" />
+              <span style="font-size: 13px; flex: 1">{{ s.label }}</span>
+              <span style="font-size: 13px; font-weight: 600; color: var(--text)">{{ s.count }}</span>
+              <span style="font-size: 12px; color: var(--text3); min-width: 34px; text-align: right">{{ s.pct }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style="
+            background: var(--bg1);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+          "
+        >
+          <div style="font-family: var(--font-head); font-weight: 600; font-size: 14px; margin-bottom: 14px">
+            Question Bank
+          </div>
+          <div style="display: flex; gap: 10px">
+            <div
+              v-for="d in difficultyBreakdown"
+              :key="d.label"
+              style="
+                flex: 1;
+                background: var(--bg2);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 10px 8px;
+                text-align: center;
+              "
+            >
+              <div :style="{ color: d.color, fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '18px', lineHeight: 1 }">
+                {{ d.count }}
+              </div>
+              <div style="font-size: 10.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px">
+                {{ d.label }}
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -11,6 +11,11 @@ export interface BlueprintSection {
   mandatory: boolean;
 }
 
+export interface UnitAllocation {
+  marks: number;
+  count: number;
+}
+
 export interface Blueprint {
   id: number;
   name: string;
@@ -21,6 +26,7 @@ export interface Blueprint {
   units: number;
   sections: BlueprintSection[];
   unitRules: Record<string, boolean>;
+  unitAllocations: Record<string, UnitAllocation[]>;
   exclusionRules: { lastNPapers: number; reuseThreshold: number };
   aiAssist: boolean;
   lastUsed: string;
@@ -40,6 +46,11 @@ const SEED: Blueprint[] = [
       { id: 2, name: 'Section B — Long Answer', type: 'Long Answer', count: 3, marksEach: 10, mandatory: false },
     ],
     unitRules: { 'Unit 1': true, 'Unit 2': true, 'Unit 3': true, 'Unit 4': false, 'Unit 5': false },
+    unitAllocations: {
+      'Unit 1': [{ marks: 4, count: 2 }, { marks: 10, count: 1 }],
+      'Unit 2': [{ marks: 4, count: 2 }, { marks: 10, count: 1 }],
+      'Unit 3': [{ marks: 4, count: 1 }, { marks: 10, count: 1 }],
+    },
     exclusionRules: { lastNPapers: 2, reuseThreshold: 3 },
     aiAssist: true,
     lastUsed: 'Apr 10, 2024',
@@ -57,6 +68,10 @@ const SEED: Blueprint[] = [
       { id: 2, name: 'Section B — Short Answer', type: 'Short Answer', count: 5, marksEach: 3, mandatory: false },
     ],
     unitRules: { 'Unit 1': true, 'Unit 2': true, 'Unit 3': false, 'Unit 4': false, 'Unit 5': false },
+    unitAllocations: {
+      'Unit 1': [{ marks: 1, count: 3 }, { marks: 3, count: 2 }],
+      'Unit 2': [{ marks: 1, count: 2 }, { marks: 3, count: 3 }],
+    },
     exclusionRules: { lastNPapers: 1, reuseThreshold: 2 },
     aiAssist: true,
     lastUsed: 'Apr 15, 2024',
@@ -82,6 +97,14 @@ const SEED: Blueprint[] = [
       'Unit 5': true,
       'Unit 6': true,
     },
+    unitAllocations: {
+      'Unit 1': [{ marks: 2, count: 2 }, { marks: 5, count: 1 }],
+      'Unit 2': [{ marks: 2, count: 2 }, { marks: 5, count: 2 }],
+      'Unit 3': [{ marks: 2, count: 2 }, { marks: 5, count: 1 }, { marks: 10, count: 1 }],
+      'Unit 4': [{ marks: 2, count: 1 }, { marks: 5, count: 2 }, { marks: 10, count: 1 }],
+      'Unit 5': [{ marks: 2, count: 2 }, { marks: 5, count: 1 }, { marks: 10, count: 1 }],
+      'Unit 6': [{ marks: 2, count: 1 }, { marks: 5, count: 1 }, { marks: 10, count: 1 }],
+    },
     exclusionRules: { lastNPapers: 3, reuseThreshold: 4 },
     aiAssist: true,
     lastUsed: 'Mar 20, 2024',
@@ -99,6 +122,11 @@ const SEED: Blueprint[] = [
       { id: 2, name: 'Section B — Long Answer', type: 'Long Answer', count: 3, marksEach: 10, mandatory: false },
     ],
     unitRules: { 'Unit 1': true, 'Unit 2': true, 'Unit 3': true, 'Unit 4': false, 'Unit 5': false },
+    unitAllocations: {
+      'Unit 1': [{ marks: 4, count: 2 }, { marks: 10, count: 1 }],
+      'Unit 2': [{ marks: 4, count: 2 }, { marks: 10, count: 1 }],
+      'Unit 3': [{ marks: 4, count: 1 }, { marks: 10, count: 1 }],
+    },
     exclusionRules: { lastNPapers: 2, reuseThreshold: 3 },
     aiAssist: false,
     lastUsed: 'Apr 18, 2024',
@@ -146,6 +174,7 @@ export const useBlueprintsStore = defineStore('blueprints', () => {
       { id: 2, name: 'Section B — Long Answer', type: 'Long Answer', count: 3, marksEach: 10, mandatory: false },
     ],
     unitRules: { 'Unit 1': true, 'Unit 2': true, 'Unit 3': true, 'Unit 4': false, 'Unit 5': false },
+    unitAllocations: { 'Unit 1': [], 'Unit 2': [], 'Unit 3': [] },
     exclusionRules: { lastNPapers: 2, reuseThreshold: 3 },
     aiAssist: true,
     lastUsed: 'Never',

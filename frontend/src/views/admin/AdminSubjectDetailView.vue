@@ -177,8 +177,11 @@ const diffColor: Record<string, string> = {
       <QFPageHeader
         :title="subject.name"
         :subtitle="`${subject.code} · ${subject.units.length} units · ${totalQuestions} questions`"
-        back="Subjects"
-        @back="router.push('/admin/subjects')"
+        :breadcrumbs="[
+          { label: 'Dashboard', to: '/admin' },
+          { label: 'Subjects', to: '/admin/subjects' },
+          { label: subject.name },
+        ]"
       >
         <template #actions>
           <QFButton variant="secondary" @click="openAddQuestion()">+ Add Question</QFButton>
@@ -201,8 +204,8 @@ const diffColor: Record<string, string> = {
       </div>
 
       <!-- OVERVIEW TAB -->
-      <div v-if="tab === 'overview'" style="display: grid; grid-template-columns: 1fr 320px; gap: 20px">
-        <div style="display: flex; flex-direction: column; gap: 12px">
+      <div v-if="tab === 'overview'" class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+        <div class="flex flex-col gap-3">
           <QFCard v-for="(u, idx) in subject.units" :key="u.id">
             <div class="qf-card-body" style="display: flex; align-items: center; gap: 14px">
               <div
@@ -244,7 +247,7 @@ const diffColor: Record<string, string> = {
           />
         </div>
 
-        <div style="display: flex; flex-direction: column; gap: 16px">
+        <div class="flex flex-col gap-4">
           <QFCard>
             <div class="qf-card-body">
               <div style="font-family: var(--font-head); font-weight: 600; margin-bottom: 12px">Subject Info</div>
@@ -301,14 +304,15 @@ const diffColor: Record<string, string> = {
 
       <!-- QUESTIONS TAB -->
       <div v-else-if="tab === 'questions'">
-        <div style="display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-end">
-          <div style="width: 240px">
+        <div class="flex flex-wrap gap-3 mb-4 items-end">
+          <div class="w-full sm:w-60">
             <QFSelect v-model="unitFilter" :options="unitOptions" />
           </div>
-          <div style="flex: 1" />
+          <div class="hidden sm:block flex-1" />
           <QFButton variant="secondary" @click="openAddQuestion()">+ Add Question</QFButton>
         </div>
         <QFCard>
+          <div class="qf-table-wrap">
           <table class="qf-table">
             <thead>
               <tr>
@@ -358,6 +362,7 @@ const diffColor: Record<string, string> = {
               </tr>
             </tbody>
           </table>
+          </div>
           <QFEmptyState
             v-if="filteredQuestions.length === 0"
             icon="◈"
@@ -501,7 +506,7 @@ const diffColor: Record<string, string> = {
             :rows="4"
             placeholder="Enter the question…"
           />
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
             <QFInput
               :model-value="questionModal.marks"
               label="Marks"

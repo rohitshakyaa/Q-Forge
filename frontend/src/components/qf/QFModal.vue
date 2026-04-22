@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = withDefaults(
+withDefaults(
   defineProps<{
     open: boolean;
     title?: string;
@@ -19,12 +19,11 @@ const handleOverlay = (e: MouseEvent) => {
 
 <template>
   <div v-if="open" class="qf-modal-overlay" @click="handleOverlay">
-    <div class="qf-modal qf-anim-in" :style="{ width: `${width}px` }">
+    <div class="qf-modal qf-anim-in" :style="{ maxWidth: `${width}px` }">
       <div class="qf-modal-header">
-        <span style="font-family: var(--font-head); font-weight: 600; font-size: 16px">{{ title }}</span>
+        <span class="font-head font-semibold text-base">{{ title }}</span>
         <button
-          class="qf-btn qf-btn-ghost qf-btn-icon"
-          style="font-size: 18px; line-height: 1"
+          class="qf-btn qf-btn-ghost qf-btn-icon text-lg leading-none"
           @click="emit('close')"
         >
           ×

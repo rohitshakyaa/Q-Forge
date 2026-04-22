@@ -65,20 +65,17 @@ const sendInvite = () => {
     <QFPageHeader
       title="Users & Roles"
       subtitle="Manage teacher and admin accounts, permissions, and subject assignments"
+      :breadcrumbs="[
+        { label: 'Dashboard', to: '/admin' },
+        { label: 'Users & Roles' },
+      ]"
     >
       <template #actions>
         <QFButton variant="primary" @click="inviteModal = true">+ Invite User</QFButton>
       </template>
     </QFPageHeader>
 
-    <div
-      style="
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 14px;
-        margin-bottom: 24px;
-      "
-    >
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-6">
       <div class="qf-stat" style="border-top: 2px solid var(--success)">
         <div class="qf-stat-label">Active Users</div>
         <div class="qf-stat-value" style="color: var(--success)">{{ activeCount }}</div>
@@ -96,11 +93,11 @@ const sendInvite = () => {
       </div>
     </div>
 
-    <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end">
-      <div class="qf-field" style="width: 320px; margin: 0">
+    <div class="flex flex-wrap gap-3 mb-5 items-end">
+      <div class="qf-field flex-1 min-w-[220px] sm:flex-none sm:w-80 m-0">
         <input v-model="search" class="qf-input" placeholder="Search by name or email…" />
       </div>
-      <div style="width: 180px">
+      <div class="w-full sm:w-44">
         <QFSelect
           v-model="roleFilter"
           :options="['All', 'Teacher', 'Admin']"
@@ -109,6 +106,7 @@ const sendInvite = () => {
     </div>
 
     <QFCard>
+      <div class="qf-table-wrap">
       <table class="qf-table">
         <thead>
           <tr>
@@ -160,10 +158,11 @@ const sendInvite = () => {
           </tr>
         </tbody>
       </table>
+      </div>
     </QFCard>
 
     <QFModal :open="inviteModal" title="Invite User" :width="460" @close="inviteModal = false">
-      <div style="display: flex; flex-direction: column; gap: 14px">
+      <div class="flex flex-col gap-3.5">
         <QFInput v-model="invite.name" label="Full name *" placeholder="e.g. Dr. Jane Smith" />
         <QFInput v-model="invite.email" label="Email address *" placeholder="jane@inst.edu" />
         <QFSelect v-model="invite.role" label="Role" :options="['Teacher', 'Admin']" />

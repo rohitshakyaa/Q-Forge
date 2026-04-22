@@ -27,6 +27,7 @@ const classes = computed(() => [
   props.size === 'sm' && 'qf-btn-sm',
   props.size === 'lg' && 'qf-btn-lg',
   props.size === 'icon' && 'qf-btn-icon',
+  props.block && 'w-full justify-center',
 ]);
 </script>
 
@@ -35,7 +36,6 @@ const classes = computed(() => [
     :type="type"
     :class="classes"
     :disabled="disabled"
-    :style="block ? { width: '100%', justifyContent: 'center' } : undefined"
   >
     <slot name="icon" />
     <slot />

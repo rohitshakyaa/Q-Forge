@@ -45,37 +45,34 @@ const rowClick = (status: string) => {
 
 <template>
   <div class="qf-content qf-anim-in">
-    <QFPageHeader title="Admin Dashboard" subtitle="System overview and recent activity">
+    <QFPageHeader
+      title="Admin Dashboard"
+      subtitle="System overview and recent activity"
+      :breadcrumbs="[{ label: 'Dashboard' }]"
+    >
       <template #actions>
         <QFButton variant="secondary" @click="router.push('/admin/upload')">⬆ Upload PDF</QFButton>
         <QFButton variant="primary" @click="router.push('/admin/review')">Review Queue</QFButton>
       </template>
     </QFPageHeader>
 
-    <div
-      style="
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 14px;
-        margin-bottom: 24px;
-      "
-    >
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 mb-6">
       <div
         v-for="s in stats"
         :key="s.label"
         class="qf-stat"
         :style="{ borderTop: `2px solid ${s.color}` }"
       >
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px">
+        <div class="flex justify-between items-center mb-2.5">
           <div class="qf-stat-label">{{ s.label }}</div>
-          <div :style="{ color: s.color, fontSize: '20px' }">{{ s.icon }}</div>
+          <div :style="{ color: s.color }" class="text-xl">{{ s.icon }}</div>
         </div>
         <div class="qf-stat-value" :style="{ color: s.color }">{{ s.value }}</div>
         <div class="qf-stat-sub">{{ s.sub }}</div>
       </div>
     </div>
 
-    <div style="display: grid; grid-template-columns: 1fr 340px; gap: 20px">
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
       <QFCard>
         <div
           class="qf-card-header"
@@ -84,40 +81,42 @@ const rowClick = (status: string) => {
           <span style="font-family: var(--font-head); font-weight: 600">Recent Documents</span>
           <QFButton variant="ghost" size="sm" @click="router.push('/admin/upload')">View all →</QFButton>
         </div>
-        <table class="qf-table">
-          <thead>
-            <tr>
-              <th>File</th>
-              <th>Subject</th>
-              <th>Questions</th>
-              <th>Status</th>
-              <th>Uploaded</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="r in recent"
-              :key="r.name"
-              style="cursor: pointer"
-              @click="rowClick(r.status)"
-            >
-              <td>
-                <div style="font-weight: 500; font-size: 13px">{{ r.name }}</div>
-              </td>
-              <td>
-                <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text2)">
-                  {{ r.subject }}
-                </span>
-              </td>
-              <td>
-                <template v-if="r.questions !== null">{{ r.questions }}</template>
-                <span v-else style="color: var(--text3)">—</span>
-              </td>
-              <td><QFBadge :variant="statusMap[r.status].v">{{ statusMap[r.status].l }}</QFBadge></td>
-              <td style="color: var(--text3); font-size: 12px">{{ r.time }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="qf-table-wrap">
+          <table class="qf-table">
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Subject</th>
+                <th>Questions</th>
+                <th>Status</th>
+                <th>Uploaded</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="r in recent"
+                :key="r.name"
+                class="cursor-pointer"
+                @click="rowClick(r.status)"
+              >
+                <td>
+                  <div class="font-medium text-[13px]">{{ r.name }}</div>
+                </td>
+                <td>
+                  <span class="font-mono text-xs text-text2">
+                    {{ r.subject }}
+                  </span>
+                </td>
+                <td>
+                  <template v-if="r.questions !== null">{{ r.questions }}</template>
+                  <span v-else class="text-text3">—</span>
+                </td>
+                <td><QFBadge :variant="statusMap[r.status].v">{{ statusMap[r.status].l }}</QFBadge></td>
+                <td class="text-text3 text-xs">{{ r.time }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </QFCard>
 
       <QFCard>
@@ -171,7 +170,7 @@ const rowClick = (status: string) => {
       </QFCard>
     </div>
 
-    <div style="margin-top: 20px">
+    <div class="mt-5">
       <QFAIHint>
         <strong style="color: var(--ai)">AI Insight:</strong> Unit 3 (Graph Algorithms) in CS302 has only 8 questions — below the recommended minimum of 15 for adequate blueprint coverage. Consider uploading more past papers for this unit.
       </QFAIHint>
