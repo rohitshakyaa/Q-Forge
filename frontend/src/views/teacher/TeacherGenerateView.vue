@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   QFAIHint,
@@ -25,6 +25,8 @@ const selectedBP = ref<Blueprint | null>(null);
 const bpSearch = ref('');
 
 papersStore.resetGeneration();
+
+onMounted(() => blueprintsStore.fetch());
 
 const blueprints = computed(() =>
   blueprintsStore.list.filter(

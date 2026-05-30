@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { QFBadge, QFButton, QFCard, QFPageHeader, QFSelect } from '../../components/qf';
 import { useCatalogStore } from '../../stores/catalog';
 
@@ -9,21 +9,36 @@ const search = ref('');
 const subjectFilter = ref('all');
 const typeFilter = ref('All Types');
 const difficultyFilter = ref('All Difficulties');
+const page = ref(1);
 
 const subjectOptions = computed(() => [
   { value: 'all', label: 'All Subjects' },
   ...catalog.subjects.map((s) => ({ value: s.code, label: `${s.code} – ${s.name}` })),
 ]);
 
-const filtered = computed(() =>
-  catalog.questionBank.filter((q) => {
-    if (subjectFilter.value !== 'all' && q.subject !== subjectFilter.value) return false;
-    if (typeFilter.value !== 'All Types' && q.type !== typeFilter.value) return false;
-    if (difficultyFilter.value !== 'All Difficulties' && q.difficulty !== difficultyFilter.value) return false;
-    if (search.value && !q.text.toLowerCase().includes(search.value.toLowerCase())) return false;
-    return true;
-  }),
-);
+const load = () =>
+  catalog.fetchQuestions({
+    status: 'approved',
+    subject: subjectFilter.value,
+    type: typeFilter.value === 'All Types' ? undefined : typeFilter.value,
+    difficulty: difficultyFilter.value === 'All Difficulties' ? undefined : difficultyFilter.value,
+    search: search.value || undefined,
+    page: page.value,
+  });
+
+onMounted(async () => {
+  await catalog.fetchSubjects();
+  await load();
+});
+
+// Reset to the first page and reload whenever a filter changes.
+watch([subjectFilter, typeFilter, difficultyFilter, search], () => {
+  page.value = 1;
+  load();
+});
+watch(page, load);
+
+const meta = computed(() => catalog.questionMeta);
 
 const diffColor: Record<string, string> = {
   Easy: 'var(--success)',
@@ -36,7 +51,7 @@ const diffColor: Record<string, string> = {
   <div class="qf-content qf-anim-in">
     <QFPageHeader
       title="Question Bank"
-      :subtitle="`${catalog.questionBank.length} approved questions across all subjects`"
+      :subtitle="`${meta.total} approved questions across all subjects`"
       :breadcrumbs="[
         { label: 'Dashboard', to: '/admin' },
         { label: 'Question Bank' },
@@ -61,7 +76,7 @@ const diffColor: Record<string, string> = {
       <div class="w-full sm:w-40">
         <QFSelect
           v-model="typeFilter"
-          :options="['All Types', 'Short Answer', 'Long Answer', 'MCQ', 'Programming']"
+          :options="['All Types', 'Short Answer', 'Long Answer', 'MCQ']"
         />
       </div>
       <div class="w-full sm:w-40">
@@ -88,7 +103,7 @@ const diffColor: Record<string, string> = {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="q in filtered" :key="q.id">
+          <tr v-for="q in catalog.questions" :key="q.id">
             <td style="padding-left: 20px; max-width: 320px">
               <div
                 style="
@@ -150,5 +165,24 @@ const diffColor: Record<string, string> = {
       </table>
       </div>
     </QFCard>
+
+    <div
+      v-if="meta.total > 0"
+      class="flex items-center justify-between mt-4"
+      style="font-size: 13px; color: var(--text3)"
+    >
+      <span>
+        Page {{ meta.currentPage }} of {{ meta.lastPage }} · {{ meta.total }} questions
+      </span>
+      <div class="flex gap-2">
+        <QFButton variant="ghost" size="sm" :disabled="page <= 1" @click="page -= 1">‹ Prev</QFButton>
+        <QFButton
+          variant="ghost"
+          size="sm"
+          :disabled="page >= meta.lastPage"
+          @click="page += 1"
+        >Next ›</QFButton>
+      </div>
+    </div>
   </div>
 </template>

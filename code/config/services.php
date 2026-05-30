@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'python' => [
+        'base_url' => env('PYTHON_SERVICE_URL', 'http://qforge_python:8000'),
+    ],
+
 ];

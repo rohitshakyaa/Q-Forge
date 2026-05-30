@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   QFAIHint,
@@ -12,23 +12,58 @@ import {
   QFSteps,
 } from '../../components/qf';
 import { useBlueprintsStore, type Blueprint } from '../../stores/blueprints';
+import { useCatalogStore } from '../../stores/catalog';
 
 const route = useRoute();
 const router = useRouter();
 const store = useBlueprintsStore();
+const catalog = useCatalogStore();
 
 const idParam = route.params.id as string;
-const existing = idParam !== 'new' ? store.getById(Number(idParam)) : null;
+const isNew = idParam === 'new';
 
-const bp = reactive<Blueprint>(
-  existing ? (JSON.parse(JSON.stringify(existing)) as Blueprint) : store.blank(),
+const bp = reactive<Blueprint>(store.blank());
+const ready = ref(false);
+
+// Subject dropdown is sourced from real subjects (decision: no mock data here).
+const subjectOptions = computed(() =>
+  catalog.subjects.map((s) => ({ value: s.code, label: `${s.code} – ${s.name}` })),
 );
-const isNew = !existing;
 
-if (!bp.unitAllocations) bp.unitAllocations = {};
-for (const u of Object.keys(bp.unitRules)) {
-  if (!bp.unitAllocations[u]) bp.unitAllocations[u] = [];
-}
+// Rebuild unit rules/allocations from the selected subject's REAL units,
+// preserving any selections the teacher already made.
+const syncUnits = async (code: string) => {
+  const subj = await catalog.loadSubject(code);
+  const names = (subj?.units ?? []).map((u) => u.name);
+  const rules: Record<string, boolean> = {};
+  const alloc: Record<string, { marks: number; count: number }[]> = {};
+  for (const n of names) {
+    rules[n] = bp.unitRules[n] ?? false;
+    alloc[n] = bp.unitAllocations[n] ?? [];
+  }
+  bp.unitRules = rules;
+  bp.unitAllocations = alloc;
+};
+
+onMounted(async () => {
+  await catalog.fetchSubjects();
+  if (!isNew) {
+    const existing = await store.loadOne(Number(idParam));
+    Object.assign(bp, JSON.parse(JSON.stringify(existing)));
+  } else if (!bp.subject) {
+    bp.subject = catalog.subjects[0]?.code ?? '';
+  }
+  if (bp.subject) await syncUnits(bp.subject);
+  ready.value = true;
+});
+
+// React only to user-initiated subject changes (after the initial load).
+watch(
+  () => bp.subject,
+  (code) => {
+    if (ready.value && code) syncUnits(code);
+  },
+);
 
 const steps = ['Basics', 'Sections', 'Unit Rules', 'Constraints', 'Review'];
 const step = reactive({ current: 0 });
@@ -85,13 +120,7 @@ const setAllocationMarks = (unit: string, idx: number, raw: string | number) => 
   bp.unitAllocations[unit][idx].marks = +raw || 0;
 };
 
-const subjectOptions = [
-  { value: 'CS301', label: 'CS301 – Data Structures' },
-  { value: 'CS302', label: 'CS302 – Algorithms' },
-  { value: 'CS303', label: 'CS303 – DBMS' },
-  { value: 'MA201', label: 'MA201 – Discrete Math' },
-];
-const typeOptions = ['Short Answer', 'Long Answer', 'MCQ', 'Programming', 'Case Study'];
+const typeOptions = ['Short Answer', 'Long Answer', 'MCQ'];
 
 const addSection = () => {
   bp.sections.push({
@@ -120,11 +149,8 @@ const deficitColor = computed(() => {
 
 const cancel = () => router.push('/teacher/blueprint');
 
-const save = () => {
-  store.save({
-    ...bp,
-    lastUsed: 'Today',
-  });
+const save = async () => {
+  await store.save({ ...bp });
   router.push('/teacher/blueprint');
 };
 

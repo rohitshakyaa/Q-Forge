@@ -1,6 +1,7 @@
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { useStorage } from '@vueuse/core';
+import api from '../api/client/axios';
 
 export interface CatalogQuestion {
   id: number;
@@ -18,12 +19,21 @@ export interface CatalogUnit {
 }
 
 export interface Subject {
+  id?: number;
   code: string;
   name: string;
   teachers: number;
   description: string;
   syllabus: string;
   units: CatalogUnit[];
+  // Counts from the list endpoint (the index does not embed questions).
+  unitsCount?: number;
+  questionsCount?: number;
+}
+
+export interface BankQuestion extends CatalogQuestion {
+  subject: string; // subject code
+  unit: string; // unit name
 }
 
 export interface CatalogUser {
@@ -35,160 +45,222 @@ export interface CatalogUser {
   lastSeen: string;
 }
 
-const SEED_SUBJECTS: Subject[] = [
-  {
-    code: 'CS301',
-    name: 'Data Structures',
-    teachers: 3,
-    description: 'Fundamental data structures including arrays, linked lists, trees, and graphs.',
-    syllabus:
-      '## CS301 – Data Structures\n\n**Course Overview:** This course covers fundamental data structures and their applications.\n\n### Unit 1: Arrays & Linked Lists\n- Static and dynamic arrays\n- Singly, doubly, and circular linked lists\n- Stack and Queue implementations\n\n### Unit 2: Trees\n- Binary trees and BST\n- AVL trees, Red-Black trees\n- Heap and Priority Queue\n\n### Unit 3: Graphs\n- Representation (adjacency matrix/list)\n- BFS, DFS traversal\n- Shortest path algorithms\n\n### Unit 4: Hashing\n- Hash functions\n- Collision resolution\n- Applications\n\n### Unit 5: Advanced Structures\n- Tries, Segment Trees\n- Disjoint Sets',
-    units: [
-      {
-        id: 1,
-        name: 'Arrays & Linked Lists',
-        questions: [
-          { id: 1, text: 'What is the time complexity of inserting at the beginning of a linked list?', marks: 4, type: 'Short Answer', difficulty: 'Easy', used: 2 },
-          { id: 2, text: 'Compare arrays and linked lists in terms of memory and access time.', marks: 6, type: 'Long Answer', difficulty: 'Medium', used: 1 },
-        ],
-      },
-      {
-        id: 2,
-        name: 'Trees',
-        questions: [
-          { id: 3, text: 'Define AVL tree and explain rotation operations.', marks: 8, type: 'Long Answer', difficulty: 'Medium', used: 3 },
-          { id: 4, text: 'What is the height of a balanced BST with n nodes?', marks: 4, type: 'Short Answer', difficulty: 'Easy', used: 1 },
-        ],
-      },
-      {
-        id: 3,
-        name: 'Graphs',
-        questions: [{ id: 5, text: 'Explain BFS and DFS with examples.', marks: 10, type: 'Long Answer', difficulty: 'Medium', used: 2 }],
-      },
-      {
-        id: 4,
-        name: 'Hashing',
-        questions: [{ id: 6, text: 'Describe open addressing for collision resolution.', marks: 5, type: 'Short Answer', difficulty: 'Easy', used: 0 }],
-      },
-      { id: 5, name: 'Advanced Structures', questions: [] },
-    ],
-  },
-  {
-    code: 'CS302',
-    name: 'Algorithms',
-    teachers: 4,
-    description: 'Algorithm design, analysis, and complexity theory.',
-    syllabus:
-      '## CS302 – Algorithms\n\n**Course Overview:** Design and analysis of algorithms.\n\n### Unit 1: Sorting & Searching\n- QuickSort, MergeSort, HeapSort\n- Binary Search\n\n### Unit 2: Hashing\n- Hash tables and applications\n\n### Unit 3: Graph Algorithms\n- Dijkstra, Bellman-Ford\n- MST: Prim, Kruskal\n\n### Unit 4: Dynamic Programming\n- Knapsack, LCS, Matrix Chain\n\n### Unit 5: Greedy Algorithms\n- Activity Selection, Huffman Coding\n\n### Unit 6: NP-Completeness\n- P vs NP, Reductions',
-    units: [
-      {
-        id: 1,
-        name: 'Sorting & Searching',
-        questions: [
-          { id: 10, text: 'Derive the time complexity of MergeSort.', marks: 8, type: 'Long Answer', difficulty: 'Medium', used: 2 },
-          { id: 11, text: 'What is a stable sort? Give an example.', marks: 4, type: 'Short Answer', difficulty: 'Easy', used: 1 },
-        ],
-      },
-      {
-        id: 2,
-        name: 'Hashing',
-        questions: [{ id: 12, text: 'What is a hash collision? Name two resolution techniques.', marks: 5, type: 'Short Answer', difficulty: 'Easy', used: 1 }],
-      },
-      {
-        id: 3,
-        name: 'Graph Algorithms',
-        questions: [{ id: 13, text: "Explain Dijkstra's algorithm with a worked example.", marks: 12, type: 'Long Answer', difficulty: 'Hard', used: 3 }],
-      },
-      {
-        id: 4,
-        name: 'Dynamic Programming',
-        questions: [{ id: 14, text: 'Solve the 0/1 Knapsack problem using DP.', marks: 10, type: 'Long Answer', difficulty: 'Hard', used: 2 }],
-      },
-      { id: 5, name: 'Greedy Algorithms', questions: [] },
-      { id: 6, name: 'NP-Completeness', questions: [] },
-    ],
-  },
-  {
-    code: 'CS303',
-    name: 'Database Management',
-    teachers: 2,
-    description: 'Relational databases, SQL, normalization, and transactions.',
-    syllabus:
-      '## CS303 – Database Management\n\n**Course Overview:** Principles of database systems.\n\n### Unit 1: Introduction\n- DBMS concepts and architecture\n- Data models\n\n### Unit 2: Relational Model & SQL\n- ER diagrams\n- SQL: DDL, DML, DCL\n\n### Unit 3: Normalization\n- 1NF, 2NF, 3NF, BCNF\n- Functional dependencies\n\n### Unit 4: Transactions\n- ACID properties\n- Concurrency control\n\n### Unit 5: Indexing\n- B+ trees, Hashing\n- Query optimization',
-    units: [
-      {
-        id: 1,
-        name: 'Introduction',
-        questions: [{ id: 20, text: 'What is a DBMS? List its advantages over file systems.', marks: 5, type: 'Short Answer', difficulty: 'Easy', used: 2 }],
-      },
-      {
-        id: 2,
-        name: 'Relational Model & SQL',
-        questions: [
-          { id: 21, text: 'Write SQL to find the second highest salary from an Employee table.', marks: 6, type: 'Short Answer', difficulty: 'Medium', used: 4 },
-          { id: 22, text: 'Explain ER diagrams with a university example.', marks: 10, type: 'Long Answer', difficulty: 'Medium', used: 3 },
-        ],
-      },
-      {
-        id: 3,
-        name: 'Normalization',
-        questions: [{ id: 23, text: 'Define BCNF and explain with an example.', marks: 8, type: 'Long Answer', difficulty: 'Medium', used: 5 }],
-      },
-      { id: 4, name: 'Transactions', questions: [] },
-      { id: 5, name: 'Indexing', questions: [] },
-    ],
-  },
-];
+export interface QuestionFilters {
+  subject?: string; // code
+  unit?: number; // id
+  type?: string; // display label
+  difficulty?: string; // display label
+  status?: string;
+  search?: string;
+  page?: number;
+  perPage?: number;
+}
 
-const SEED_USERS: CatalogUser[] = [
-  { name: 'Dr. Sarah Johnson', email: 's.johnson@inst.edu', role: 'Teacher', subjects: ['CS301', 'CS302'], status: 'active', lastSeen: '2m ago' },
-  { name: 'Prof. Alex Chen', email: 'a.chen@inst.edu', role: 'Teacher', subjects: ['CS303', 'CS401'], status: 'active', lastSeen: '1h ago' },
-  { name: 'Dr. Priya Patel', email: 'p.patel@inst.edu', role: 'Teacher', subjects: ['MA201'], status: 'active', lastSeen: '3h ago' },
-  { name: 'Robert Kim', email: 'r.kim@inst.edu', role: 'Admin', subjects: [], status: 'active', lastSeen: '5m ago' },
-  { name: 'Maria Santos', email: 'm.santos@inst.edu', role: 'Teacher', subjects: ['CS302'], status: 'inactive', lastSeen: '2d ago' },
-];
+export interface PageMeta {
+  currentPage: number;
+  lastPage: number;
+  total: number;
+  perPage: number;
+}
+
+// ── Enum mapping: backend stays canonical lowercase; the UI uses display labels.
+const TYPE_TO_API: Record<string, string> = {
+  'Short Answer': 'short',
+  'Long Answer': 'long',
+  MCQ: 'mcq',
+};
+const TYPE_FROM_API: Record<string, string> = {
+  short: 'Short Answer',
+  long: 'Long Answer',
+  mcq: 'MCQ',
+};
+const DIFF_TO_API: Record<string, string> = { Easy: 'easy', Medium: 'medium', Hard: 'hard' };
+const DIFF_FROM_API: Record<string, CatalogQuestion['difficulty']> = {
+  easy: 'Easy',
+  medium: 'Medium',
+  hard: 'Hard',
+};
+
+const toApiType = (t?: string) => (t ? (TYPE_TO_API[t] ?? t.toLowerCase()) : undefined);
+const fromApiType = (t: string) => TYPE_FROM_API[t] ?? t;
+const toApiDiff = (d?: string) => (d ? (DIFF_TO_API[d] ?? d.toLowerCase()) : undefined);
+const fromApiDiff = (d?: string | null) => (d ? DIFF_FROM_API[d] : undefined);
+
+interface ApiQuestion {
+  id: number;
+  text: string;
+  marks: number;
+  type: string;
+  difficulty: string | null;
+  used_count: number;
+  subject_code?: string;
+  unit_name?: string;
+}
+interface ApiUnit {
+  id: number;
+  name: string;
+  questions?: ApiQuestion[];
+}
+interface ApiSubject {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  syllabus: string | null;
+  teachers: number;
+  units_count?: number;
+  questions_count?: number;
+  units?: ApiUnit[];
+}
+
+const mapQuestion = (q: ApiQuestion): CatalogQuestion => ({
+  id: q.id,
+  text: q.text,
+  marks: q.marks,
+  type: fromApiType(q.type),
+  difficulty: fromApiDiff(q.difficulty),
+  used: q.used_count,
+});
+
+const mapUnit = (u: ApiUnit): CatalogUnit => ({
+  id: u.id,
+  name: u.name,
+  questions: (u.questions ?? []).map(mapQuestion),
+});
+
+const mapSubject = (s: ApiSubject): Subject => ({
+  id: s.id,
+  code: s.code,
+  name: s.name,
+  description: s.description ?? '',
+  syllabus: s.syllabus ?? '',
+  teachers: s.teachers ?? 0,
+  unitsCount: s.units_count,
+  questionsCount: s.questions_count,
+  units: (s.units ?? []).map(mapUnit),
+});
 
 export const useCatalogStore = defineStore('catalog', () => {
-  const subjects = useStorage<Subject[]>('qforge-subjects', SEED_SUBJECTS, undefined, {
-    mergeDefaults: (s, d) => (s && s.length ? s : d),
-  });
-  const users = useStorage<CatalogUser[]>('qforge-users', SEED_USERS, undefined, {
-    mergeDefaults: (s, d) => (s && s.length ? s : d),
-  });
+  const subjects = ref<Subject[]>([]);
+  const current = ref<Subject | null>(null);
+  const questions = ref<BankQuestion[]>([]);
+  const questionMeta = ref<PageMeta>({ currentPage: 1, lastPage: 1, total: 0, perPage: 20 });
 
-  const getSubject = (code: string) => subjects.value.find((s) => s.code === code) ?? null;
+  // Out of M1 scope (user management is later) — keep mock-backed users for now.
+  const users = useStorage<CatalogUser[]>('qforge-users', []);
 
-  const saveSubject = (updated: Subject) => {
-    const idx = subjects.value.findIndex((s) => s.code === updated.code);
-    if (idx >= 0) {
-      subjects.value[idx] = updated;
-    } else {
-      subjects.value.push(updated);
-    }
-  };
+  const getSubject = (code: string) =>
+    current.value?.code === code ? current.value : (subjects.value.find((s) => s.code === code) ?? null);
 
-  const removeSubject = (code: string) => {
-    subjects.value = subjects.value.filter((s) => s.code !== code);
-  };
+  const questionBank = computed(() => questions.value);
 
-  const questionBank = computed(() =>
-    subjects.value.flatMap((s) =>
-      s.units.flatMap((u) =>
-        u.questions.map((q) => ({
-          ...q,
-          subject: s.code,
-          unit: u.name,
-        })),
-      ),
-    ),
-  );
+  async function fetchSubjects() {
+    const { data } = await api.get('/subjects');
+    subjects.value = (data.data as ApiSubject[]).map(mapSubject);
+  }
+
+  async function loadSubject(code: string) {
+    const { data } = await api.get(`/subjects/${code}`);
+    current.value = mapSubject(data.data as ApiSubject);
+    return current.value;
+  }
+
+  async function createSubject(payload: { code: string; name: string; description?: string }) {
+    await api.post('/subjects', payload);
+    await fetchSubjects();
+  }
+
+  async function updateSubject(code: string, payload: Partial<{ name: string; description: string; syllabus: string }>) {
+    await api.put(`/subjects/${code}`, payload);
+    if (current.value?.code === code) await loadSubject(code);
+  }
+
+  async function removeSubject(code: string) {
+    await api.delete(`/subjects/${code}`);
+    await fetchSubjects();
+  }
+
+  async function addUnit(code: string, name: string) {
+    await api.post(`/subjects/${code}/units`, { name });
+    await loadSubject(code);
+  }
+
+  async function updateUnit(code: string, unitId: number, name: string) {
+    await api.put(`/units/${unitId}`, { name });
+    await loadSubject(code);
+  }
+
+  async function deleteUnit(code: string, unitId: number) {
+    await api.delete(`/units/${unitId}`);
+    await loadSubject(code);
+  }
+
+  async function createQuestion(
+    code: string,
+    payload: { subjectId: number; unitId: number; text: string; marks: number; type: string; difficulty?: string },
+  ) {
+    await api.post('/questions', {
+      subject_id: payload.subjectId,
+      unit_id: payload.unitId,
+      text: payload.text,
+      marks: payload.marks,
+      type: toApiType(payload.type),
+      difficulty: toApiDiff(payload.difficulty),
+    });
+    await loadSubject(code);
+  }
+
+  async function deleteQuestion(code: string, questionId: number) {
+    await api.delete(`/questions/${questionId}`);
+    await loadSubject(code);
+  }
+
+  async function fetchQuestions(filters: QuestionFilters = {}) {
+    const params: Record<string, string | number> = {
+      status: filters.status ?? 'approved',
+      page: filters.page ?? 1,
+      per_page: filters.perPage ?? 20,
+    };
+    if (filters.subject && filters.subject !== 'all') params.subject = filters.subject;
+    if (filters.unit) params.unit = filters.unit;
+    const apiType = toApiType(filters.type);
+    if (apiType) params.type = apiType;
+    const apiDiff = toApiDiff(filters.difficulty);
+    if (apiDiff) params.difficulty = apiDiff;
+    if (filters.search) params.search = filters.search;
+
+    const { data } = await api.get('/questions', { params });
+    questions.value = (data.data as ApiQuestion[]).map((q) => ({
+      ...mapQuestion(q),
+      subject: q.subject_code ?? '',
+      unit: q.unit_name ?? '',
+    }));
+    questionMeta.value = {
+      currentPage: data.meta.current_page,
+      lastPage: data.meta.last_page,
+      total: data.meta.total,
+      perPage: data.meta.per_page,
+    };
+  }
 
   return {
     subjects,
+    current,
     users,
+    questions,
+    questionMeta,
     questionBank,
     getSubject,
-    saveSubject,
+    fetchSubjects,
+    loadSubject,
+    createSubject,
+    updateSubject,
     removeSubject,
+    addUnit,
+    updateUnit,
+    deleteUnit,
+    createQuestion,
+    deleteQuestion,
+    fetchQuestions,
   };
 });

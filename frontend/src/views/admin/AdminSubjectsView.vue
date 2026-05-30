@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   QFButton,
@@ -17,15 +17,14 @@ const showAdd = ref(false);
 const deleteConfirm = ref<Subject | null>(null);
 const newSubj = reactive({ code: '', name: '', description: '' });
 
-const addSubject = () => {
+onMounted(() => catalog.fetchSubjects());
+
+const addSubject = async () => {
   if (!newSubj.code || !newSubj.name) return;
-  catalog.saveSubject({
+  await catalog.createSubject({
     code: newSubj.code,
     name: newSubj.name,
     description: newSubj.description,
-    teachers: 0,
-    syllabus: '',
-    units: [],
   });
   newSubj.code = '';
   newSubj.name = '';
@@ -33,9 +32,9 @@ const addSubject = () => {
   showAdd.value = false;
 };
 
-const confirmDelete = () => {
+const confirmDelete = async () => {
   if (deleteConfirm.value) {
-    catalog.removeSubject(deleteConfirm.value.code);
+    await catalog.removeSubject(deleteConfirm.value.code);
     deleteConfirm.value = null;
   }
 };
@@ -44,7 +43,7 @@ const setHover = (e: MouseEvent, enter: boolean) => {
   (e.currentTarget as HTMLElement).style.borderColor = enter ? 'var(--cyan)' : 'var(--border)';
 };
 
-const totalQuestions = (s: Subject) => s.units.flatMap((u) => u.questions).length;
+const totalQuestions = (s: Subject) => s.questionsCount ?? s.units.flatMap((u) => u.questions).length;
 </script>
 
 <template>

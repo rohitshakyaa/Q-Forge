@@ -32,7 +32,7 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 
 | Milestone | Status | Notes |
 |---|---|---|
-| M1 — Domain foundation | Not started | |
+| M1 — Domain foundation | Done | Migrations/models/CRUD + role gating, demo seeder, PythonService, frontend wired to live API. 20 feature tests green. |
 | M2 — The algorithm (centerpiece) | Not started | |
 | M3 — Papers lifecycle + export | Not started | |
 | M4 — PDF pipeline | Not started | |
@@ -88,7 +88,7 @@ flowchart LR
 
 ## M1 — Domain foundation
 
-**Status:** Not started
+**Status:** Done
 
 **Goal:** Stand up the core data model and CRUD so subjects, units, questions, and blueprints can
 be managed through the real UI.

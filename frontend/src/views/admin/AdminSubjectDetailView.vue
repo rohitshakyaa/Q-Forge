@@ -23,10 +23,18 @@ const route = useRoute();
 const router = useRouter();
 const catalog = useCatalogStore();
 
-const cloneSubject = (s: Subject): Subject => JSON.parse(JSON.stringify(s));
-
 const code = computed(() => String(route.params.code ?? ''));
-const subject = computed<Subject | null>(() => catalog.getSubject(code.value));
+const subject = computed<Subject | null>(() =>
+  catalog.current && catalog.current.code === code.value ? catalog.current : null,
+);
+
+watch(
+  code,
+  (c) => {
+    if (c) catalog.loadSubject(c);
+  },
+  { immediate: true },
+);
 
 const tab = ref<'overview' | 'questions' | 'syllabus'>('overview');
 const syllabusMode = ref<'view' | 'edit' | 'upload'>('view');
@@ -77,27 +85,22 @@ const openEditUnit = (u: CatalogUnit) => {
   unitModal.value = { open: true, mode: 'edit', id: u.id, name: u.name };
 };
 
-const saveUnit = () => {
+const saveUnit = async () => {
   if (!subject.value || !unitModal.value.name.trim()) return;
-  const updated = cloneSubject(subject.value);
+  const name = unitModal.value.name.trim();
   if (unitModal.value.mode === 'add') {
-    const nextId = (updated.units.at(-1)?.id ?? 0) + 1;
-    updated.units.push({ id: nextId, name: unitModal.value.name.trim(), questions: [] });
+    await catalog.addUnit(code.value, name);
   } else if (unitModal.value.id !== null) {
-    const idx = updated.units.findIndex((u) => u.id === unitModal.value.id);
-    if (idx >= 0) updated.units[idx].name = unitModal.value.name.trim();
+    await catalog.updateUnit(code.value, unitModal.value.id, name);
   }
-  catalog.saveSubject(updated);
   unitModal.value.open = false;
 };
 
 const deleteUnitConfirm = ref<CatalogUnit | null>(null);
 
-const confirmDeleteUnit = () => {
+const confirmDeleteUnit = async () => {
   if (!subject.value || !deleteUnitConfirm.value) return;
-  const updated = cloneSubject(subject.value);
-  updated.units = updated.units.filter((u) => u.id !== deleteUnitConfirm.value!.id);
-  catalog.saveSubject(updated);
+  await catalog.deleteUnit(code.value, deleteUnitConfirm.value.id);
   deleteUnitConfirm.value = null;
 };
 
@@ -123,21 +126,16 @@ const openAddQuestion = (unitId: number | null = null) => {
   questionModal.difficulty = 'Medium';
 };
 
-const saveQuestion = () => {
-  if (!subject.value || !questionModal.unitId || !questionModal.text.trim()) return;
-  const updated = cloneSubject(subject.value);
-  const unit = updated.units.find((u) => u.id === questionModal.unitId);
-  if (!unit) return;
-  const nextId = (updated.units.flatMap((u) => u.questions).map((q) => q.id).sort((a, b) => b - a)[0] ?? 0) + 1;
-  unit.questions.push({
-    id: nextId,
+const saveQuestion = async () => {
+  if (!subject.value?.id || !questionModal.unitId || !questionModal.text.trim()) return;
+  await catalog.createQuestion(code.value, {
+    subjectId: subject.value.id,
+    unitId: questionModal.unitId,
     text: questionModal.text.trim(),
     marks: questionModal.marks,
     type: questionModal.type,
     difficulty: questionModal.difficulty,
-    used: 0,
   });
-  catalog.saveSubject(updated);
   questionModal.open = false;
 };
 
@@ -147,21 +145,15 @@ const simulateSyllabusUpload = () => {
   syllabusMode.value = 'view';
 };
 
-const saveSyllabus = () => {
+const saveSyllabus = async () => {
   if (!subject.value) return;
-  const updated = cloneSubject(subject.value);
-  updated.syllabus = syllabusDraft.value;
-  catalog.saveSubject(updated);
+  await catalog.updateSubject(code.value, { syllabus: syllabusDraft.value });
   syllabusMode.value = 'view';
 };
 
-const deleteQuestion = (unitId: number, questionId: number) => {
+const deleteQuestion = async (_unitId: number, questionId: number) => {
   if (!subject.value) return;
-  const updated = cloneSubject(subject.value);
-  const unit = updated.units.find((u) => u.id === unitId);
-  if (!unit) return;
-  unit.questions = unit.questions.filter((q) => q.id !== questionId);
-  catalog.saveSubject(updated);
+  await catalog.deleteQuestion(code.value, questionId);
 };
 
 const diffColor: Record<string, string> = {
@@ -516,7 +508,7 @@ const diffColor: Record<string, string> = {
             <QFSelect
               v-model="questionModal.type"
               label="Type"
-              :options="['Short Answer', 'Long Answer', 'MCQ', 'Programming']"
+              :options="['Short Answer', 'Long Answer', 'MCQ']"
             />
             <QFSelect
               v-model="questionModal.difficulty"

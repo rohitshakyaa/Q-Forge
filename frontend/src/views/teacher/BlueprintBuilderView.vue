@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   QFBadge,
@@ -17,6 +17,8 @@ const store = useBlueprintsStore();
 const search = ref('');
 const deleteConfirm = ref<Blueprint | null>(null);
 
+onMounted(() => store.fetch());
+
 const filtered = computed(() =>
   store.list.filter(
     (b) =>
@@ -30,9 +32,9 @@ const newBlueprint = () => router.push('/teacher/blueprint/new');
 const edit = (bp: Blueprint) => router.push(`/teacher/blueprint/${bp.id}`);
 const generate = () => router.push('/teacher/generate');
 
-const confirmDelete = () => {
+const confirmDelete = async () => {
   if (deleteConfirm.value) {
-    store.remove(deleteConfirm.value.id);
+    await store.remove(deleteConfirm.value.id);
     deleteConfirm.value = null;
   }
 };
