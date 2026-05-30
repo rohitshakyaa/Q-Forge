@@ -1,0 +1,33 @@
+%% QForge — paper generation sequence (M2). Deterministic, synchronous.
+sequenceDiagram
+    actor T as Teacher
+    participant FE as Frontend
+    participant API as Laravel API
+    participant PG as PaperGenerator
+    participant DB as MySQL
+
+    T->>FE: Select blueprint, click "Generate"
+    FE->>API: POST /papers/generate { blueprint_id }
+    API->>PG: generate(blueprint)
+    PG->>PG: BlueprintCompiler -> slots
+    loop each slot
+        PG->>DB: CandidateFilter (subject/unit/type/marks,<br/>exclude last N papers + already chosen)
+        DB-->>PG: candidate pool
+        PG->>PG: GreedySelector picks best (unit balance, LRU)
+    end
+    PG->>PG: ConstraintValidator (counts, marks, coverage, repetition)
+    alt all constraints satisfied
+        PG-->>API: GenerationResult: paper + constraint_results[]
+        API->>DB: persist paper + paper_questions, increment used_count
+        API-->>FE: 200 { paper, constraint_results }
+        FE-->>T: Render paper + green/red constraints
+    else validation fails
+        PG->>PG: BacktrackingResolver tries alternates
+        alt resolved
+            PG-->>API: valid paper
+        else bank too thin
+            PG-->>API: { satisfiable:false, missing_slots[] }
+            API-->>FE: 200 { satisfiable:false, missing_slots }
+            FE-->>T: Show "cannot satisfy" + "Expand bank with AI" (M5)
+        end
+    end

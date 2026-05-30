@@ -124,6 +124,11 @@ needed — call its REST API with httpx). `pdfplumber`, `pypdf`, `pytesseract`, 
 
 ## Milestones (algorithm-first, each independently demoable)
 
+> See [`docs/MILESTONES.md`](docs/MILESTONES.md) for the full demoable breakdown, per-milestone
+> cumulative ER diagrams, and sequence diagrams. **Displayable product** for each milestone means
+> the relevant existing frontend screen is wired to the live API — its Pinia mock data replaced by
+> real calls through `frontend/src/api/client/axios.ts` — not just a backend/curl demo.
+
 - **M1 — Domain foundation.** Migrations + models + relationships for all tables; admin CRUD for subjects/units/questions; teacher CRUD for blueprints; `QForgeDemoSeeder`. Wire `config/services.php` python config + `PythonService` wrapper. *Demo:* manage subjects/units/questions/blueprints via API + frontend.
 - **M2 — The algorithm (centerpiece).** `app/Services/PaperGeneration/*`, `POST /papers/generate`, `papers` + `paper_questions` persistence, `ConstraintResult` output, full unit-test suite. Built entirely on seeded questions. *Demo:* generate a valid paper from a blueprint; show constraint pass/fail; show `missing_slots` on an infeasible blueprint.
 - **M3 — Papers lifecycle + export.** Repetition tracking via `paper_questions` (exclude-last-N), paper history endpoints, dompdf + PhpWord export from a shared view-model. *Demo:* generate → preview → export PDF/DOCX → second generation excludes prior questions.

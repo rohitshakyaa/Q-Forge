@@ -1,0 +1,67 @@
+%% QForge database schema after M4 — PDF pipeline
+%% NEW in M4: document_uploads (tracks async extraction).
+%% Framework infra (not shown): jobs / failed_jobs / job_batches for Redis+Horizon queue.
+%% Extracted questions land as QUESTIONS rows: source=extracted, status=pending.
+erDiagram
+    USERS ||--o{ BLUEPRINTS : owns
+    USERS ||--o{ PAPERS : owns
+    USERS ||--o{ DOCUMENT_UPLOADS : uploads
+    SUBJECTS ||--o{ UNITS : "has"
+    SUBJECTS ||--o{ QUESTIONS : "scopes"
+    SUBJECTS ||--o{ BLUEPRINTS : "targets"
+    SUBJECTS ||--o{ PAPERS : "for"
+    SUBJECTS ||--o{ DOCUMENT_UPLOADS : "for"
+    UNITS ||--o{ QUESTIONS : "groups"
+    UNITS ||--o{ PAPER_QUESTIONS : "tags"
+    BLUEPRINTS ||--o{ PAPERS : "generates"
+    PAPERS ||--o{ PAPER_QUESTIONS : "contains"
+    QUESTIONS ||--o{ PAPER_QUESTIONS : "appears in"
+
+    USERS {
+        bigint id PK
+        enum role "teacher|admin"
+    }
+    SUBJECTS {
+        bigint id PK
+        string code UK
+    }
+    UNITS {
+        bigint id PK
+        bigint subject_id FK
+    }
+    QUESTIONS {
+        bigint id PK
+        bigint subject_id FK
+        bigint unit_id FK
+        enum source "extracted|ai|manual"
+        enum status "pending|approved|rejected"
+    }
+    BLUEPRINTS {
+        bigint id PK
+        bigint owner_id FK
+        bigint subject_id FK
+    }
+    PAPERS {
+        bigint id PK
+        bigint owner_id FK
+        bigint blueprint_id FK
+        bigint subject_id FK
+    }
+    PAPER_QUESTIONS {
+        bigint id PK
+        bigint paper_id FK
+        bigint question_id FK
+        bigint unit_id FK
+    }
+    DOCUMENT_UPLOADS {
+        bigint id PK
+        bigint uploader_id FK "users.id"
+        bigint subject_id FK "nullable"
+        enum type "syllabus|past_paper"
+        string original_filename
+        string stored_path "shared volume"
+        enum status "uploaded|processing|parsed|failed"
+        text error "nullable"
+        json meta "nullable e.g. exam year"
+        timestamps created_updated
+    }
