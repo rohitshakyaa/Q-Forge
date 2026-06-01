@@ -74,9 +74,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('questions', QuestionController::class);
     });
 
-    // Teacher-only, owner-scoped blueprints + paper generation.
+    // Teacher-only, owner-scoped blueprints + paper generation, lifecycle, export.
     Route::middleware('role:teacher')->group(function () {
         Route::apiResource('blueprints', BlueprintController::class);
         Route::post('papers/generate', [PaperController::class, 'generate']);
+        // Static segments before the {paper} wildcard so they aren't swallowed by it.
+        Route::get('papers/analytics', [PaperController::class, 'analytics']);
+        Route::get('papers/{paper}/export', [PaperController::class, 'export']);
+        Route::apiResource('papers', PaperController::class)->only(['index', 'show', 'update', 'destroy']);
     });
 });

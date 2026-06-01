@@ -3,11 +3,14 @@
 namespace App\Services\PaperGeneration;
 
 use App\Models\Blueprint;
+use App\Models\Paper;
+use App\Models\PaperQuestion;
 use App\Models\Question;
 use App\Services\PaperGeneration\Support\CompiledBlueprint;
 use App\Services\PaperGeneration\Support\GenerationResult;
 use App\Services\PaperGeneration\Support\MissingSlot;
 use App\Services\PaperGeneration\Support\Slot;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 /**
@@ -34,8 +37,14 @@ class PaperGenerator
     {
         $compiled = $this->compiler->compile($blueprint);
 
+        // Cross-paper repetition rule (M3): exclude every question used in the
+        // most recent N papers by the same owner for the same subject. Computed
+        // once and applied to both the greedy and the backtracking candidate
+        // pools so backtracking can't reintroduce an excluded question.
+        $lastN = $this->lastNExclusion($blueprint, $compiled);
+
         // Pass 1 — greedy (LRU) fill.
-        $greedy = $this->greedyFill($compiled);
+        $greedy = $this->greedyFill($compiled, $lastN);
         $constraints = $this->validator->validate($compiled, $greedy);
 
         if ($this->isComplete($compiled, $greedy) && $this->validator->allPass($constraints)) {
@@ -43,7 +52,7 @@ class PaperGenerator
         }
 
         // Pass 2 — backtracking repair for a fully-valid assignment.
-        $candidatesBySlot = $this->poolsBySlot($compiled);
+        $candidatesBySlot = $this->poolsBySlot($compiled, $lastN);
         $resolved = $this->resolver->resolve($compiled, $candidatesBySlot);
 
         if ($resolved !== null) {
@@ -59,18 +68,57 @@ class PaperGenerator
     }
 
     /**
-     * Fill each slot in order with the greedy pick, excluding questions already
-     * chosen in this paper.
+     * Build the cross-paper exclusion closure for this run, or null when the
+     * blueprint disables it (lastNPapers <= 0) or there are no prior papers.
      *
+     * @return (callable(Builder): void)|null
+     */
+    private function lastNExclusion(Blueprint $blueprint, CompiledBlueprint $compiled): ?callable
+    {
+        if ($compiled->lastNPapers <= 0) {
+            return null;
+        }
+
+        $recentPaperIds = Paper::query()
+            ->where('owner_id', $blueprint->owner_id)
+            ->where('subject_id', $blueprint->subject_id)
+            ->orderByDesc('generated_at')
+            ->orderByDesc('id')
+            ->limit($compiled->lastNPapers)
+            ->pluck('id');
+
+        if ($recentPaperIds->isEmpty()) {
+            return null;
+        }
+
+        $excludedIds = PaperQuestion::query()
+            ->whereIn('paper_id', $recentPaperIds)
+            ->pluck('question_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($excludedIds)) {
+            return null;
+        }
+
+        return fn (Builder $query) => $query->whereNotIn('id', $excludedIds);
+    }
+
+    /**
+     * Fill each slot in order with the greedy pick, excluding questions already
+     * chosen in this paper and (via $lastN) those used in the last N papers.
+     *
+     * @param  (callable(Builder): void)|null  $lastN
      * @return array<int, Question>
      */
-    private function greedyFill(CompiledBlueprint $compiled): array
+    private function greedyFill(CompiledBlueprint $compiled, ?callable $lastN = null): array
     {
         $selections = [];
         $usedIds = [];
 
         foreach ($compiled->slots as $slot) {
-            $pool = $this->filter->for($slot, $compiled, $usedIds);
+            $pool = $this->filter->for($slot, $compiled, $usedIds, $lastN);
             $pick = $this->selector->pick($pool);
 
             if ($pick !== null) {
@@ -84,15 +132,16 @@ class PaperGenerator
 
     /**
      * Full candidate pool per slot (no per-paper exclusions — the resolver
-     * enforces uniqueness itself).
+     * enforces uniqueness itself — but the cross-paper $lastN rule still applies).
      *
+     * @param  (callable(Builder): void)|null  $lastN
      * @return array<int, Collection<int, Question>>
      */
-    private function poolsBySlot(CompiledBlueprint $compiled): array
+    private function poolsBySlot(CompiledBlueprint $compiled, ?callable $lastN = null): array
     {
         $pools = [];
         foreach ($compiled->slots as $slot) {
-            $pools[$slot->index] = $this->filter->for($slot, $compiled);
+            $pools[$slot->index] = $this->filter->for($slot, $compiled, [], $lastN);
         }
 
         return $pools;

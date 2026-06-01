@@ -1,26 +1,39 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { QFBadge, QFButton, QFCard, QFPageHeader } from '../../components/qf';
-import { usePapersStore } from '../../stores/papers';
+import { usePapersStore, type ExportFormat } from '../../stores/papers';
 
 const route = useRoute();
 const store = usePapersStore();
 
 const paperId = Number(route.params.id);
-const paper = computed(() => store.getById(paperId) ?? store.list[0]);
+const paper = computed(() => store.getById(paperId));
 
-const formats = [
+// Only the formats Laravel can render (txt is intentionally not offered).
+const formats: Array<{ id: ExportFormat; icon: string; label: string; desc: string; popular: boolean }> = [
   { id: 'docx', icon: '📄', label: 'Word Document', desc: '.docx — Fully editable', popular: true },
   { id: 'pdf', icon: '🖨', label: 'PDF', desc: '.pdf — Print-ready', popular: false },
-  { id: 'txt', icon: '📝', label: 'Plain Text', desc: '.txt — Simple export', popular: false },
 ];
-const selected = ref('docx');
+const selected = ref<ExportFormat>('docx');
 const exported = ref(false);
+const downloading = ref(false);
+const errorMsg = ref<string | null>(null);
 
-const download = () => {
-  if (paper.value?.id != null) store.markExported(paper.value.id);
-  exported.value = true;
+onMounted(() => store.fetchById(paperId));
+
+const download = async () => {
+  if (paper.value?.id == null) return;
+  downloading.value = true;
+  errorMsg.value = null;
+  try {
+    await store.exportPaper(paper.value.id, selected.value);
+    exported.value = true;
+  } catch {
+    errorMsg.value = 'Export failed. Please try again.';
+  } finally {
+    downloading.value = false;
+  }
 };
 </script>
 
@@ -56,7 +69,7 @@ const download = () => {
               cursor: 'pointer',
               transition: 'all 0.15s',
             }"
-            @click="selected = f.id"
+            @click="selected = f.id; exported = false"
           >
             <span style="font-size: 20px">{{ f.icon }}</span>
             <div style="flex: 1">
@@ -68,15 +81,16 @@ const download = () => {
           </div>
         </div>
         <QFButton
-          v-if="!exported"
           variant="primary"
           block
+          :disabled="downloading"
           style="padding: 11px; font-size: 15px"
           @click="download"
-        >Download .{{ selected }}</QFButton>
+        >{{ downloading ? 'Preparing…' : `Download .${selected}` }}</QFButton>
         <div
-          v-else
+          v-if="exported"
           style="
+            margin-top: 12px;
             background: var(--success-dim);
             border: 1px solid var(--success);
             border-radius: var(--radius);
@@ -91,6 +105,10 @@ const download = () => {
             {{ paper.name.replace(/\s+/g, '') }}.{{ selected }} downloaded
           </span>
         </div>
+        <div
+          v-if="errorMsg"
+          style="margin-top: 12px; color: var(--danger, #e44); font-size: 13px; font-weight: 600"
+        >{{ errorMsg }}</div>
       </div>
     </QFCard>
   </div>

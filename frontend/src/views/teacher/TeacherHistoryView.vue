@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { QFAIHint, QFBadge, QFButton, QFCard, QFPageHeader } from '../../components/qf';
 import { usePapersStore } from '../../stores/papers';
@@ -6,12 +7,22 @@ import { usePapersStore } from '../../stores/papers';
 const router = useRouter();
 const store = usePapersStore();
 
-const analytics: Array<[string, string]> = [
-  ['Papers generated', String(store.list.length)],
-  ['Questions used', '88'],
-  ['Unique questions', '72'],
-  ['Avg. reuse rate', '1.2×'],
-];
+onMounted(() => {
+  store.fetchHistory();
+  store.fetchAnalytics();
+});
+
+// Real usage aggregates from GET /papers/analytics (falls back to derived/zero).
+const analytics = computed<Array<[string, string]>>(() => {
+  const a = store.analytics;
+  return [
+    ['Papers generated', String(a?.generated ?? store.list.length)],
+    ['Questions used', String(a?.questionsUsed ?? 0)],
+    ['Unique questions', String(a?.uniqueQuestions ?? 0)],
+    ['Avg. reuse rate', `${(a?.reuseRate ?? 0).toFixed(1)}×`],
+    ['Total exports', String(a?.totalExports ?? 0)],
+  ];
+});
 </script>
 
 <template>

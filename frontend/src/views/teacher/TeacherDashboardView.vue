@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { QFBadge, QFButton, QFPageHeader } from '../../components/qf';
 import { useBlueprintsStore } from '../../stores/blueprints';
@@ -85,6 +85,9 @@ const setListHover = (e: MouseEvent, enter: boolean) => {
   const el = e.currentTarget as HTMLElement;
   el.style.borderColor = enter ? 'var(--border2)' : 'var(--border)';
 };
+
+// Hydrate recent papers + stats from the live history endpoint.
+onMounted(() => papersStore.fetchHistory());
 </script>
 
 <template>

@@ -188,6 +188,45 @@ class PaperGeneratorTest extends TestCase
         $this->assertCount(2, $result->selections);
     }
 
+    public function test_excludes_questions_used_in_the_last_n_papers(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+
+        // Six distinct short/4 questions: three will be "spent" by a prior paper.
+        $this->seedQuestions($subject, $u1, 'short', 4, 6);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 3, 'marksEach' => 4],
+        ], ['Unit 1'], 12);
+        // Turn the cross-paper window on (helper defaults it to 0).
+        $definition = $blueprint->definition;
+        $definition['exclusionRules']['lastNPapers'] = 1;
+        $blueprint->update(['definition' => $definition]);
+
+        // Persist a prior paper owning the first three question ids.
+        $spentIds = Question::where('subject_id', $subject->id)->orderBy('id')->limit(3)->pluck('id');
+        $paper = \App\Models\Paper::create([
+            'owner_id' => $blueprint->owner_id,
+            'blueprint_id' => $blueprint->id,
+            'subject_id' => $subject->id,
+            'name' => 'Prior', 'total_marks' => 12, 'duration' => 60,
+            'status' => 'draft', 'export_count' => 0, 'generated_at' => now(),
+        ]);
+        foreach ($spentIds as $i => $qid) {
+            $paper->paperQuestions()->create([
+                'question_id' => $qid, 'unit_id' => $u1->id,
+                'section_label' => 'Section A', 'display_no' => $i + 1, 'marks' => 4, 'is_ai' => false,
+            ]);
+        }
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        $chosen = collect($result->selections)->map(fn (Question $q) => $q->id)->all();
+        $this->assertEmpty(array_intersect($chosen, $spentIds->all()), 'Engine reused a last-N excluded question.');
+    }
+
     public function test_backtracking_recovers_a_valid_paper_the_naive_greedy_pass_fails_to_find(): void
     {
         // The academic centerpiece. The greedy selector is LRU-only (unit-agnostic):

@@ -1,0 +1,82 @@
+<?php
+
+namespace App\Services\Export;
+
+use App\Services\PaperGeneration\Support\PaperViewModel;
+use PhpOffice\PhpWord\PhpWord;
+use PhpOffice\PhpWord\SimpleType\Jc;
+
+/**
+ * Renders a paper to a .docx file from the shared PaperViewModel. Mirrors the
+ * Blade/PDF template so PDF and DOCX exports are structurally identical.
+ */
+class PaperWordBuilder
+{
+    public function __construct(private readonly PaperViewModel $vm)
+    {
+    }
+
+    /**
+     * Build the document and write it to a temp path. Caller is responsible for
+     * streaming + deleting the file.
+     */
+    public function build(): string
+    {
+        $header = $this->vm->header();
+        $word = new PhpWord();
+        $word->setDefaultFontName('DejaVu Sans');
+        $word->setDefaultFontSize(11);
+
+        $section = $word->addSection([
+            'marginLeft' => 1100,
+            'marginRight' => 1100,
+            'marginTop' => 1000,
+            'marginBottom' => 1000,
+        ]);
+
+        $center = ['alignment' => Jc::CENTER];
+
+        $section->addText(strtoupper($header['institute']), ['bold' => true, 'size' => 11], $center);
+        $title = $header['title'].($header['subject'] ? " ({$header['subject']})" : '');
+        $section->addText($title, ['bold' => true, 'size' => 16], $center);
+        if ($header['date']) {
+            $section->addText("Examination — {$header['date']}", ['size' => 12], $center);
+        }
+        $section->addText(
+            "Duration: {$header['duration']} minutes    Maximum Marks: {$header['marks']}",
+            ['size' => 11],
+            $center
+        );
+
+        $section->addTextBreak(1);
+        $instructions = $section->addTextRun(['spaceAfter' => 120]);
+        $instructions->addText('Instructions: ', ['bold' => true, 'size' => 10]);
+        $instructions->addText($header['instructions'], ['size' => 10]);
+
+        $section->addTextBreak(1);
+
+        foreach ($this->vm->sections() as $sec) {
+            $section->addText($sec['label'], ['bold' => true, 'size' => 13]);
+            if (! empty($sec['note'])) {
+                $section->addText($sec['note'], ['italic' => true, 'size' => 10, 'color' => '666666']);
+            }
+            $section->addTextBreak(1);
+
+            foreach ($sec['questions'] as $q) {
+                $line = $section->addTextRun(['spaceAfter' => 120]);
+                $line->addText("{$q['no']}.  ", ['bold' => true]);
+                $line->addText($q['text']);
+                $meta = trim(($q['unit'] ? "[{$q['unit']}] " : '').($q['ai'] ? '[AI] ' : ''));
+                $tail = "[{$q['marks']} Marks]".($meta ? "   {$meta}" : '');
+                $line->addText("    {$tail}", ['bold' => true, 'size' => 10, 'color' => '444444']);
+            }
+
+            $section->addTextBreak(1);
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'qforge_docx_').'.docx';
+        $word->save($path, 'Word2007');
+
+        return $path;
+    }
+}

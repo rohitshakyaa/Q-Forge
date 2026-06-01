@@ -71,8 +71,8 @@ class PaperGenerateTest extends TestCase
 
         $this->assertSame(1, Paper::where('blueprint_id', $blueprint->id)->where('status', 'draft')->count());
         $this->assertSame(3, Paper::first()->paperQuestions()->count());
-        // used_count stays 0 — repetition history only counts saved papers (M3).
-        $this->assertSame(0, Question::where('used_count', '>', 0)->count());
+        // M3: the three chosen questions have their used_count bumped on persist.
+        $this->assertSame(3, Question::where('used_count', '>', 0)->count());
     }
 
     public function test_returns_missing_slots_and_persists_nothing_for_infeasible_blueprint(): void

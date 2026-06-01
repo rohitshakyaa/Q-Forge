@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   QFAIHint,
@@ -15,10 +15,25 @@ const router = useRouter();
 const store = usePapersStore();
 
 const paperId = Number(route.params.id);
-const paper = computed(() => store.getById(paperId) ?? store.list[0]);
+const paper = computed(() => store.getById(paperId));
 
 const editMode = ref(false);
+const saving = ref(false);
 const showReplace = ref<PaperQuestion | null>(null);
+
+// Always load authoritatively on mount so direct links, refreshes, and History
+// navigation work (and we pick up status/export_count changes after export).
+onMounted(() => store.fetchById(paperId));
+
+const save = async () => {
+  if (paper.value?.id == null) return;
+  saving.value = true;
+  try {
+    await store.update(paper.value.id, { status: 'saved' });
+  } finally {
+    saving.value = false;
+  }
+};
 
 const alternatives = [
   "Explain Prim's algorithm for minimum spanning tree with a worked example.",
@@ -51,7 +66,9 @@ const onAltHover = (e: MouseEvent, enter: boolean) => {
         <QFButton variant="ghost" size="sm" @click="editMode = !editMode">
           {{ editMode ? 'Done Editing' : '✏ Edit' }}
         </QFButton>
-        <QFButton variant="secondary" size="sm">Save</QFButton>
+        <QFButton variant="secondary" size="sm" :disabled="saving || paper.status === 'saved'" @click="save">
+          {{ paper.status === 'saved' ? 'Saved' : saving ? 'Saving…' : 'Save' }}
+        </QFButton>
         <QFButton variant="primary" size="sm" @click="router.push(`/teacher/export/${paper.id}`)">
           Export →
         </QFButton>

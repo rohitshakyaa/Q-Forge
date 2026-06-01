@@ -34,7 +34,7 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 |---|---|---|
 | M1 — Domain foundation | Done | Migrations/models/CRUD + role gating, demo seeder, PythonService, frontend wired to live API. 20 feature tests green. |
 | M2 — The algorithm (centerpiece) | Done | Greedy+backtracking engine in `app/Services/PaperGeneration/`, `POST /papers/generate`, papers/paper_questions persistence, constraint_results + missing_slots. 29 tests green (5 unit incl. backtracking-recovery + 4 feature). Generate/Paper screens wired to live API. |
-| M3 — Papers lifecycle + export | Not started | |
+| M3 — Papers lifecycle + export | Done | Cross-paper repetition (exclude last-N papers, owner+subject) wired into `PaperGenerator`; `used_count` bumped on persist; `apiResource papers` (index/show/update/destroy) + `analytics` + `export?format=pdf\|docx` from one shared `PaperViewModel` (dompdf + PhpWord). CS301 bank expanded for two disjoint papers. 36 tests green (new: engine exclusion unit test + double-generate/export feature suite). Paper View / Export / History wired to live API. |
 | M4 — PDF pipeline | Not started | |
 | M5 — AI bank expansion | Not started | |
 
@@ -336,9 +336,23 @@ the seeded bank can't satisfy → sees the precise shortfall ("need 2× 10-mark 
 
 ## M3 — Papers lifecycle + export
 
-**Status:** Not started
+**Status:** Done
 
 **Goal:** Preview, save, and export generated papers, and prove repetition control across papers.
+
+**Implementation notes / deltas from the original design**
+- **Repetition basis:** *all* persisted papers count (drafts included) — generation persists a draft,
+  so a second generate naturally excludes the first; no separate Save-gate is required. The window is
+  the most recent `lastNPapers` for the **same owner + subject** (any blueprint), ordered by
+  `generated_at`. Built once per run in `PaperGenerator` and applied to **both** the greedy and the
+  backtracking candidate pools (so backtracking can't reintroduce an excluded question).
+- **`used_count`:** now incremented on generate-persist (M2 had deferred it). Repetition control
+  itself is derived from `paper_questions`, not this column — it remains a display/LRU counter.
+- **Save:** the Paper View *Save* button sets `status=saved` via `PATCH /papers/{id}`.
+- **Shared view-model:** `PaperViewModel` (built from the persisted paper, header from
+  `config/qforge.php`) feeds the JSON resource, the Blade→PDF template, and the PhpWord→DOCX builder.
+- **Export download:** the frontend pulls the file as an axios blob (Bearer token can't ride a plain
+  `<a href>`) and triggers a client-side download; the `txt` tile was dropped (pdf/docx only).
 
 **Scope / deliverables**
 - *Backend:* repetition control wired into `CandidateFilter` (exclude questions used in the last N
@@ -391,9 +405,14 @@ erDiagram
 Generate a second paper from the same blueprint and confirm previously-used questions are excluded.
 History screen lists past papers with status.
 
-**Acceptance / verification**
-- Feature tests: export returns valid PDF and DOCX; second generation excludes last-N questions.
-- Exported files open correctly; History reflects real records.
+**Acceptance / verification** ✅
+- `php artisan test` — 36 passing. New: an engine unit test (last-N excluded ids never reappear in
+  selections) and a feature suite (double-generate → disjoint question sets; `export?format=pdf` →
+  `%PDF` + `export_count=1`/`status=exported`; `?format=docx` → valid zip + `export_count=2`;
+  owner-scoped history + 403 on another owner's paper; analytics shape).
+- Seeded demo (live API): CS301 "Standard Midterm" generates twice with **zero** question overlap;
+  PDF (`StandardMidterm.pdf`) and DOCX (`StandardMidterm.docx`) export and open correctly; History
+  lists both papers with status, and analytics report real usage aggregates.
 
 ---
 
