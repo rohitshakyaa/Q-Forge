@@ -171,7 +171,7 @@ const setListHover = (e: MouseEvent, enter: boolean) => {
         <div style="display: flex; flex-direction: column; gap: 10px">
           <div
             v-for="p in recentPapers"
-            :key="p.id"
+            :key="p.id ?? p.name"
             style="
               background: var(--bg1);
               border: 1px solid var(--border);

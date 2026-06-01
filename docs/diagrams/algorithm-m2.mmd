@@ -1,0 +1,35 @@
+%% QForge — paper-generation algorithm control flow (M2).
+%% Deterministic greedy + backtracking. Pure PHP, no external solver.
+%% See ../Algorithm.md for the step-by-step description.
+flowchart TD
+    A([POST /papers/generate · blueprint_id]) --> B[BlueprintCompiler:<br/>sections → ordered slots,<br/>unitRules → allowedUnitIds]
+
+    B --> C[/Greedy pass — for each slot in order/]
+    C --> D[CandidateFilter:<br/>approved · subject · type · marks<br/>∈ allowedUnits · exclude chosen<br/>order by used_count, id]
+    D --> E[GreedySelector:<br/>pick lowest used_count, then id]
+    E --> F{More slots?}
+    F -- yes --> C
+
+    F -- no --> G[ConstraintValidator:<br/>counts · total marks ·<br/>unit coverage · no repetition]
+    G --> H{All slots filled<br/>AND all constraints pass?}
+
+    H -- yes --> S1([SUCCESS])
+
+    H -- no --> I[Build full candidate pool per slot]
+    I --> J[BacktrackingResolver:<br/>bounded DFS, uncovered-unit-first,<br/>distinct ids, coverage must hold]
+    J --> K{Valid assignment<br/>found?}
+
+    K -- yes --> G2[Re-validate selections] --> S1
+
+    K -- no --> L[computeMissingSlots:<br/>1 supply deficit = required − available<br/>2 else uncovered allowed units]
+    L --> F2([INFEASIBLE:<br/>best-effort partial + missing_slots])
+
+    S1 --> P[Controller: persist papers status=draft<br/>+ paper_questions in a transaction<br/>NB: used_count NOT bumped — M3]
+    P --> R1([200 · paper + constraint_results])
+
+    F2 --> R2([200 · satisfiable:false ·<br/>partial paper + missing_slots + constraint_results<br/>nothing persisted])
+
+    classDef ok fill:#16351f,stroke:#3fae6b,color:#d7f5e3;
+    classDef bad fill:#3a1620,stroke:#d65a76,color:#f7d9e1;
+    class S1,R1 ok;
+    class F2,R2 bad;

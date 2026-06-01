@@ -41,7 +41,7 @@ const analytics: Array<[string, string]> = [
           <tbody>
             <tr
               v-for="p in store.list"
-              :key="p.id"
+              :key="p.id ?? p.name"
               style="cursor: pointer"
               @click="router.push(`/teacher/paper/${p.id}`)"
             >

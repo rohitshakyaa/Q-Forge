@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\SubjectController;
 use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Api\QuestionController;
 use App\Http\Controllers\Api\BlueprintController;
+use App\Http\Controllers\Api\PaperController;
 use App\Services\PythonService;
 
 Route::get('/user', function (Request $request) {
@@ -73,8 +74,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('questions', QuestionController::class);
     });
 
-    // Teacher-only, owner-scoped blueprints.
+    // Teacher-only, owner-scoped blueprints + paper generation.
     Route::middleware('role:teacher')->group(function () {
         Route::apiResource('blueprints', BlueprintController::class);
+        Route::post('papers/generate', [PaperController::class, 'generate']);
     });
 });

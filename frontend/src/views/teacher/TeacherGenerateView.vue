@@ -8,7 +8,6 @@ import {
   QFCard,
   QFEmptyState,
   QFPageHeader,
-  QFProgress,
   QFSpinner,
   QFSteps,
 } from '../../components/qf';
@@ -44,12 +43,20 @@ const stepIndex = computed(() => {
   return 3;
 });
 
-const startGeneration = () => {
+const startGeneration = async () => {
+  if (!selectedBP.value) return;
   phase.value = 'generating';
-  papersStore.startGeneration(() => {
-    phase.value = 'done';
-  });
+  await papersStore.generate(selectedBP.value.id);
+  phase.value = 'done';
 };
+
+const openPaper = () => {
+  const id = papersStore.current?.id;
+  if (id) router.push(`/teacher/paper/${id}`);
+};
+
+const passedCount = computed(() => papersStore.constraints.filter((c) => c.pass === true).length);
+const totalConstraints = computed(() => papersStore.constraints.length);
 
 const letter = (i: number) => String.fromCharCode(65 + i);
 
@@ -117,7 +124,7 @@ const unitBreakdown = (bp: Blueprint) =>
         v-if="blueprints.length === 0"
         icon="⬢"
         title="No blueprints found"
-        :desc="`No blueprints match \u201c${bpSearch}\u201d. Try a different search or create a new blueprint.`"
+        :desc="`No blueprints match “${bpSearch}”. Try a different search or create a new blueprint.`"
       >
         <template #action>
           <div style="display: flex; gap: 8px">
@@ -279,17 +286,19 @@ const unitBreakdown = (bp: Blueprint) =>
           {{ selectedBP?.name }}
         </div>
         <p style="color: var(--text2); font-size: 14px; margin: 0 auto 24px; max-width: 440px; line-height: 1.7">
-          The blueprint engine will select questions from the bank, apply all constraint rules, and fill any gaps with AI assistance if enabled.
+          The blueprint engine will select questions from the bank and apply every constraint rule —
+          unit coverage, marks, counts, and no repetition — using deterministic greedy selection with
+          backtracking.
         </p>
         <div
           style="display: flex; gap: 12px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap"
         >
           <div
             v-for="item in [
-              { value: selectedBP?.questions ?? 18, label: 'Questions' },
-              { value: selectedBP?.totalMarks ?? 50, label: 'Total Marks' },
-              { value: selectedBP?.units ?? 3, label: 'Units' },
-              { value: selectedBP?.exclusionRules.lastNPapers ?? 2, label: 'Papers Excluded' },
+              { value: selectedBP?.questions ?? 0, label: 'Questions' },
+              { value: selectedBP?.totalMarks ?? 0, label: 'Total Marks' },
+              { value: selectedBP?.units ?? 0, label: 'Units' },
+              { value: selectedBP?.exclusionRules.lastNPapers ?? 0, label: 'Papers Excluded' },
             ]"
             :key="item.label"
             style="
@@ -377,62 +386,17 @@ const unitBreakdown = (bp: Blueprint) =>
     <div
       v-else-if="phase === 'generating'"
       class="qf-anim-in"
-      style="display: flex; flex-direction: column; gap: 16px"
     >
       <QFCard>
-        <div class="qf-card-body">
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px">
-            <QFSpinner />
-            <span
-              class="qf-ai-working"
-              style="font-family: var(--font-head); font-weight: 600; font-size: 15px; color: var(--ai)"
-            >AI generating your paper…</span>
-            <span
-              style="
-                margin-left: auto;
-                font-family: var(--font-mono);
-                color: var(--cyan);
-                font-weight: 700;
-              "
-            >{{ papersStore.progress }}%</span>
+        <div class="qf-card-body" style="text-align: center; padding: 48px 32px">
+          <div style="display: flex; justify-content: center; margin-bottom: 18px">
+            <QFSpinner :size="32" />
           </div>
-          <QFProgress :value="papersStore.progress" ai />
-        </div>
-      </QFCard>
-      <QFCard>
-        <div class="qf-card-body">
-          <div
-            style="
-              font-family: var(--font-mono);
-              font-size: 12px;
-              color: var(--text2);
-              display: flex;
-              flex-direction: column;
-              gap: 6px;
-              max-height: 200px;
-              overflow-y: auto;
-            "
-          >
-            <div
-              v-for="(l, i) in papersStore.logLines"
-              :key="i"
-              :style="{
-                display: 'flex',
-                gap: '10px',
-                alignItems: 'center',
-                color: l.includes('AI') ? 'var(--ai)' : l.includes('✓') ? 'var(--success)' : 'var(--text2)',
-              }"
-            >
-              <span style="color: var(--text3); flex-shrink: 0">{{ String(i + 1).padStart(2, '0') }}</span>
-              <span>{{ l }}</span>
-            </div>
-            <div
-              v-if="papersStore.generating"
-              style="display: flex; gap: 8px; align-items: center; color: var(--text3)"
-            >
-              <QFSpinner :size="12" />
-              <span>Processing…</span>
-            </div>
+          <div style="font-family: var(--font-head); font-weight: 600; font-size: 16px; margin-bottom: 6px">
+            Generating paper…
+          </div>
+          <div style="color: var(--text3); font-size: 13px">
+            Running the constraint engine against the question bank.
           </div>
         </div>
       </QFCard>
@@ -443,7 +407,11 @@ const unitBreakdown = (bp: Blueprint) =>
       class="qf-anim-in"
       style="display: flex; flex-direction: column; gap: 16px"
     >
-      <div class="bg-success-dim border border-success rounded-[var(--radius-lg)] p-4 sm:px-5 flex flex-col sm:flex-row gap-3 sm:items-center">
+      <!-- Success banner -->
+      <div
+        v-if="papersStore.satisfiable"
+        class="bg-success-dim border border-success rounded-[var(--radius-lg)] p-4 sm:px-5 flex flex-col sm:flex-row gap-3 sm:items-center"
+      >
         <div class="flex gap-3 items-center flex-1">
           <span class="text-2xl">✓</span>
           <div>
@@ -451,46 +419,100 @@ const unitBreakdown = (bp: Blueprint) =>
               Paper generated successfully
             </div>
             <div class="text-[13px] text-text2">
-              All 6 constraints satisfied · 1 AI-assisted question pending review
+              All {{ totalConstraints }} constraints satisfied · {{ papersStore.current?.questions }} questions ·
+              {{ papersStore.current?.marks }} marks
             </div>
           </div>
         </div>
         <div class="flex flex-wrap gap-2 sm:ml-auto">
-          <QFButton variant="secondary" @click="router.push(`/teacher/paper/${papersStore.list[0]?.id}`)">
-            Preview Paper
-          </QFButton>
-          <QFButton variant="primary" @click="router.push(`/teacher/paper/${papersStore.list[0]?.id}`)">
+          <QFButton variant="secondary" @click="phase = 'select'">Generate Another</QFButton>
+          <QFButton variant="primary" @click="openPaper">
             View &amp; Export →
           </QFButton>
         </div>
       </div>
-      <QFCard>
+
+      <!-- Infeasible banner + shortfall -->
+      <div
+        v-else
+        class="bg-danger-dim border border-danger rounded-[var(--radius-lg)] p-4 sm:px-5 flex flex-col gap-3"
+      >
+        <div class="flex gap-3 items-center">
+          <span class="text-2xl">⚠</span>
+          <div class="flex-1">
+            <div class="font-semibold text-danger mb-[2px]">
+              Cannot satisfy this blueprint
+            </div>
+            <div class="text-[13px] text-text2">
+              The question bank is too thin. {{ passedCount }}/{{ totalConstraints }} constraints met.
+              Add questions to the bank for the slots below, then try again.
+            </div>
+          </div>
+          <QFButton variant="secondary" size="sm" @click="phase = 'select'">← Back</QFButton>
+        </div>
+        <div
+          v-if="papersStore.missingSlots.length"
+          style="
+            background: var(--bg2);
+            border-radius: var(--radius);
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          "
+        >
+          <div
+            style="
+              font-size: 11px;
+              color: var(--text3);
+              font-weight: 600;
+              letter-spacing: 0.04em;
+              text-transform: uppercase;
+            "
+          >Missing from the bank</div>
+          <div
+            v-for="(m, i) in papersStore.missingSlots"
+            :key="i"
+            style="display: flex; align-items: center; gap: 10px; font-size: 13px"
+          >
+            <span style="color: var(--danger); font-weight: 700; font-family: var(--font-mono)">
+              {{ m.need }}×
+            </span>
+            <span>{{ m.marks }}-mark {{ m.type }}</span>
+            <span v-if="m.unit" style="color: var(--indigo); font-weight: 600">· {{ m.unit }}</span>
+            <span style="margin-left: auto; color: var(--text3); font-size: 12px">{{ m.section_label }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Constraint report (both paths) -->
+      <QFCard v-if="papersStore.constraints.length">
         <div class="qf-card-header pb-3.5">
           <span class="font-head font-semibold">Constraint Report</span>
         </div>
         <div class="qf-table-wrap">
-        <table class="qf-table">
-          <thead>
-            <tr>
-              <th style="padding-left: 20px">Constraint</th>
-              <th>Expected</th>
-              <th>Result</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(c, i) in papersStore.constraints" :key="i">
-              <td style="padding-left: 20px; font-weight: 500">{{ c.label }}</td>
-              <td style="color: var(--text3); font-size: 13px">{{ c.expected }}</td>
-              <td style="font-family: var(--font-mono); font-size: 13px">{{ c.got }}</td>
-              <td>
-                <QFBadge v-if="c.pass === true" variant="success">✓ Pass</QFBadge>
-                <QFBadge v-else-if="c.pass === false" variant="danger">✕ Fail</QFBadge>
-                <QFBadge v-else variant="ai">✦ AI Assisted</QFBadge>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+          <table class="qf-table">
+            <thead>
+              <tr>
+                <th style="padding-left: 20px">Constraint</th>
+                <th>Expected</th>
+                <th>Result</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(c, i) in papersStore.constraints" :key="i">
+                <td style="padding-left: 20px; font-weight: 500">{{ c.label }}</td>
+                <td style="color: var(--text3); font-size: 13px">{{ c.expected }}</td>
+                <td style="font-family: var(--font-mono); font-size: 13px">{{ c.got }}</td>
+                <td>
+                  <QFBadge v-if="c.pass === true" variant="success">✓ Pass</QFBadge>
+                  <QFBadge v-else-if="c.pass === false" variant="danger">✕ Fail</QFBadge>
+                  <QFBadge v-else variant="ai">✦ Info</QFBadge>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </QFCard>
     </div>

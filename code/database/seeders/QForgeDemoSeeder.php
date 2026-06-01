@@ -27,14 +27,18 @@ class QForgeDemoSeeder extends Seeder
             ],
             'Trees' => [
                 ['short', 4, 'easy', 'Define a binary search tree.'],
+                ['short', 4, 'medium', 'What is the difference between a complete and a full binary tree?'],
                 ['long', 10, 'medium', 'Explain AVL tree rotations with examples.'],
+                ['long', 10, 'hard', 'Describe red-black tree insertion and the re-colouring cases.'],
                 ['long', 5, 'medium', 'Describe how a min-heap supports a priority queue.'],
                 ['mcq', 2, 'medium', 'A balanced BST with n nodes has height of order? (a) n (b) log n (c) n^2 (d) 1'],
             ],
             'Graphs' => [
                 ['short', 5, 'medium', 'State the difference between BFS and DFS.'],
-                ['long', 10, 'hard', "Explain Dijkstra's shortest path algorithm with a worked example."],
                 ['short', 4, 'easy', 'How is a graph represented using an adjacency list?'],
+                ['short', 4, 'easy', 'How does an adjacency matrix represent a graph?'],
+                ['long', 10, 'hard', "Explain Dijkstra's shortest path algorithm with a worked example."],
+                ['long', 10, 'medium', 'Explain topological sorting with a worked example on a DAG.'],
             ],
             'Hashing' => [
                 ['short', 5, 'easy', 'Describe open addressing for collision resolution.'],
@@ -47,7 +51,7 @@ class QForgeDemoSeeder extends Seeder
             ],
         ]);
 
-        $this->seedSubject('CS303', 'Database Management', [
+        $cs303 = $this->seedSubject('CS303', 'Database Management', [
             'Introduction' => [
                 ['short', 5, 'easy', 'What is a DBMS? List its advantages over file systems.'],
                 ['mcq', 2, 'easy', 'Which is NOT a DBMS? (a) MySQL (b) PostgreSQL (c) Excel (d) Oracle'],
@@ -73,6 +77,7 @@ class QForgeDemoSeeder extends Seeder
         ]);
 
         $this->seedBlueprint($cs301);
+        $this->seedInfeasibleBlueprint($cs303);
     }
 
     /**
@@ -147,6 +152,42 @@ class QForgeDemoSeeder extends Seeder
                     ],
                     'unitRules' => $unitRules,
                     'unitAllocations' => $unitAllocations,
+                    'exclusionRules' => ['lastNPapers' => 2, 'reuseThreshold' => 3],
+                ],
+                'last_used_at' => null,
+            ]
+        );
+    }
+
+    /**
+     * A deliberately unsatisfiable blueprint for the "cannot satisfy" demo:
+     * it demands 20-mark long-answer questions, a marks value the bank never
+     * holds (questions top out at 10), so generation always returns a precise
+     * shortfall instead of a paper — regardless of how deep the bank is seeded.
+     */
+    private function seedInfeasibleBlueprint(Subject $subject): void
+    {
+        $teacher = User::where('email', 'teacher@qforge.com')->first();
+        if (! $teacher) {
+            return;
+        }
+
+        $unitNames = $subject->units()->orderBy('position')->pluck('name')->all();
+        $unitRules = collect($unitNames)->mapWithKeys(fn ($n) => [$n => true])->all();
+
+        Blueprint::updateOrCreate(
+            ['owner_id' => $teacher->id, 'name' => 'Comprehensive Final (needs a bigger bank)'],
+            [
+                'subject_id' => $subject->id,
+                'total_marks' => 60,
+                'duration' => 120,
+                'ai_assist' => false,
+                'definition' => [
+                    'sections' => [
+                        ['id' => 1, 'name' => 'Section A — Essay', 'type' => 'Long Answer', 'count' => 3, 'marksEach' => 20, 'mandatory' => true],
+                    ],
+                    'unitRules' => $unitRules,
+                    'unitAllocations' => [],
                     'exclusionRules' => ['lastNPapers' => 2, 'reuseThreshold' => 3],
                 ],
                 'last_used_at' => null,

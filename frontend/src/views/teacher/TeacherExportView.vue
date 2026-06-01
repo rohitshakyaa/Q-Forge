@@ -19,7 +19,7 @@ const selected = ref('docx');
 const exported = ref(false);
 
 const download = () => {
-  if (paper.value) store.markExported(paper.value.id);
+  if (paper.value?.id != null) store.markExported(paper.value.id);
   exported.value = true;
 };
 </script>

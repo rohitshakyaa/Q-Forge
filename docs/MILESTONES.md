@@ -33,7 +33,7 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 | Milestone | Status | Notes |
 |---|---|---|
 | M1 — Domain foundation | Done | Migrations/models/CRUD + role gating, demo seeder, PythonService, frontend wired to live API. 20 feature tests green. |
-| M2 — The algorithm (centerpiece) | Not started | |
+| M2 — The algorithm (centerpiece) | Done | Greedy+backtracking engine in `app/Services/PaperGeneration/`, `POST /papers/generate`, papers/paper_questions persistence, constraint_results + missing_slots. 29 tests green (5 unit incl. backtracking-recovery + 4 feature). Generate/Paper screens wired to live API. |
 | M3 — Papers lifecycle + export | Not started | |
 | M4 — PDF pipeline | Not started | |
 | M5 — AI bank expansion | Not started | |
@@ -181,10 +181,26 @@ unit → see them in the Question Bank. Log in as teacher → build a blueprint 
 
 ## M2 — The algorithm (centerpiece)
 
-**Status:** Not started
+**Status:** Done
 
 **Goal:** Generate a valid question paper from a blueprint using the deterministic
 greedy + backtracking engine, and report exactly why generation fails when the bank is too thin.
+
+**Algorithm write-up:** step-by-step description + control-flow flowchart in
+[`Algorithm.md`](Algorithm.md) (source: [`diagrams/algorithm-m2.mmd`](diagrams/algorithm-m2.mmd)).
+
+**Implementation notes / deltas from the original design**
+- **Slot model:** `sections` are authoritative for paper structure (flattened → ordered slots by
+  `BlueprintCompiler`). `unitRules` is both the hard candidate filter *and* the unit-coverage rule;
+  `unitAllocations` is a **soft** balancing hint only in M2 (so the seed's 42-vs-50 allocation/section
+  mismatch is harmless).
+- **Coverage is a hard constraint** and is what `BacktrackingResolver` solves for: the greedy pass is
+  deliberately unit-agnostic (LRU only), so it can starve a unit even when a covering assignment
+  exists — backtracking then recovers it (the headline unit test).
+- **Delta from PLAN.md / `seq-generate.mmd`:** on success the paper is persisted as `status=draft`
+  but `questions.used_count` is **not** incremented at generate time — that (and last-N repetition
+  counting *saved* papers only) moves to Save in M3. The infeasible result returns a **best-effort
+  partial** paper + `missing_slots[]` (not all-or-nothing); a partial result is not persisted.
 
 **Scope / deliverables**
 - *Backend:* `app/Services/PaperGeneration/` — `BlueprintCompiler`, `CandidateFilter`,
@@ -307,10 +323,14 @@ sequenceDiagram
 (sections, numbered questions, marks) with a constraint checklist all green. Then picks a blueprint
 the seeded bank can't satisfy → sees the precise shortfall ("need 2× 10-mark from Unit 3").
 
-**Acceptance / verification**
-- `php artisan test --testsuite=Unit` — feasible→valid; unit-coverage enforced; repetition excluded
-  across last N; infeasible→correct `missing_slots`; backtracking recovers a greedy-fails case.
-- Generate screen shows a live paper end-to-end from seeded data.
+**Acceptance / verification** ✅
+- `php artisan test` — 29 passing (Unit: feasible→valid; unit-coverage enforced; in-paper repetition
+  excluded; infeasible→correct `missing_slots`; backtracking recovers a greedy-fails case. Feature:
+  draft persisted without bumping `used_count`; infeasible persists nothing; teacher-only + owner
+  gating).
+- Seeded demo: CS301 "Standard Midterm" generates a full all-green paper; CS303 "Comprehensive Final
+  (needs a bigger bank)" returns the precise shortfall (`3× 10-mark long`). Generate screen shows it
+  live end-to-end.
 
 ---
 

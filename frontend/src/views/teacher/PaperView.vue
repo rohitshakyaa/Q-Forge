@@ -155,7 +155,7 @@ const onAltHover = (e: MouseEvent, enter: boolean) => {
               <div style="flex: 1">
                 <p style="font-size: 14px; line-height: 1.7; color: var(--text)">{{ q.text }}</p>
                 <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap">
-                  <span class="qf-chip">{{ q.unit }}</span>
+                  <span v-if="q.unit" class="qf-chip">{{ q.unit }}</span>
                   <QFBadge v-if="q.ai" variant="ai">✦ AI Generated</QFBadge>
                 </div>
               </div>
