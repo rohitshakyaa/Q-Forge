@@ -35,6 +35,7 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 | M1 — Domain foundation | Done | Migrations/models/CRUD + role gating, demo seeder, PythonService, frontend wired to live API. 20 feature tests green. |
 | M2 — The algorithm (centerpiece) | Done | Greedy+backtracking engine in `app/Services/PaperGeneration/`, `POST /papers/generate`, papers/paper_questions persistence, constraint_results + missing_slots. 29 tests green (5 unit incl. backtracking-recovery + 4 feature). Generate/Paper screens wired to live API. |
 | M3 — Papers lifecycle + export | Done | Cross-paper repetition (exclude last-N papers, owner+subject) wired into `PaperGenerator`; `used_count` bumped on persist; `apiResource papers` (index/show/update/destroy) + `analytics` + `export?format=pdf\|docx` from one shared `PaperViewModel` (dompdf + PhpWord). CS301 bank expanded for two disjoint papers. 36 tests green (new: engine exclusion unit test + double-generate/export feature suite). Paper View / Export / History wired to live API. |
+| M3.1 — Imported past papers | Not started | Design accepted ([`adr/0001-imported-past-papers.md`](adr/0001-imported-past-papers.md)). Record real exams as `papers` rows (`origin=imported`) so the repetition window covers historical exams subject-wide. Schema delta + repetition-query change + import service + admin endpoint. **Not yet implemented.** |
 | M4 — PDF pipeline | Not started | |
 | M5 — AI bank expansion | Not started | |
 
@@ -413,6 +414,44 @@ History screen lists past papers with status.
 - Seeded demo (live API): CS301 "Standard Midterm" generates twice with **zero** question overlap;
   PDF (`StandardMidterm.pdf`) and DOCX (`StandardMidterm.docx`) export and open correctly; History
   lists both papers with status, and analytics report real usage aggregates.
+
+---
+
+## M3.1 — Imported past papers (repetition source)
+
+**Status:** Not started — design accepted, see [`adr/0001-imported-past-papers.md`](adr/0001-imported-past-papers.md)
+
+**Goal:** Let real, historical exams influence repetition control, closing the gap where M3's
+"exclude last N papers" only ever saw QForge-generated papers. A recorded past exam becomes a
+first-class `papers` row (`origin=imported`) whose questions the engine then avoids — subject-wide.
+
+**Why a separate milestone:** it re-opens the schema that M3 froze (one `papers` column + a
+nullability change) and introduces a new semantic (institution-wide, historical repetition), so it
+is tracked and diagram-updated on its own rather than folded silently into M3 or M4.
+
+**Scope / deliverables** *(design only so far — no code yet)*
+- *Schema:* `papers.blueprint_id` → **nullable**; add `papers.origin` enum `('generated','imported')`
+  default `generated`. No change to `paper_questions`. Update the M2/M3 ER diagrams on implementation.
+- *Engine:* one query change in `PaperGenerator::lastNExclusion()` — the rolling last-N window
+  becomes `where subject_id AND (owner_id = me OR origin = 'imported')`, ordered by `generated_at`.
+  Pure rolling (imported exams age out normally); nothing else in the algorithm changes.
+- *Service:* `ImportedPaperService::record(subject, name, exam_date, existing_question_ids,
+  new_questions, uploader)` — links existing bank questions **and** creates inline new ones
+  (`status=approved`), writes the `imported` paper + `paper_questions`, bumps `used_count`.
+- *API:* `POST /subjects/{subject}/past-papers` (**admin-only**); `owner_id` = uploading admin,
+  `generated_at` = `exam_date`. The future M4 upload job calls the **same service**.
+
+**Database after M3.1** — `papers` gains `origin` and a nullable `blueprint_id`; no new tables.
+(Diagram update deferred to implementation.)
+
+**Out of scope:** imported papers do not show in teacher History/analytics (owner-scoped); no PDF
+parsing (that is M4); no "always-exclude/pinned" imported papers.
+
+**Acceptance / verification** *(target)*
+- Feature test: a generated paper excludes questions from an `imported` past exam, **cross-teacher**
+  (admin-recorded exam suppresses for teacher A and B).
+- Imported papers absent from `GET /papers` history + analytics; rolling — an imported exam ages out
+  once `lastNPapers` newer papers exist.
 
 ---
 

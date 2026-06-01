@@ -21,6 +21,7 @@ Milestones are **sequential** — each assumes the previous ones are `Done`:
 | M1 | [`m1-domain-foundation.md`](m1-domain-foundation.md) | Domain schema + CRUD (subjects/units/questions/blueprints) |
 | M2 | [`m2-algorithm.md`](m2-algorithm.md) | The constraint-based generation algorithm (centerpiece, TDD) |
 | M3 | [`m3-papers-export.md`](m3-papers-export.md) | Papers lifecycle, repetition control, PDF/DOCX export |
+| M3.1 | [`m3.1-imported-past-papers.md`](m3.1-imported-past-papers.md) | Record real past exams (`origin=imported`) into the repetition window |
 | M4 | [`m4-pdf-pipeline.md`](m4-pdf-pipeline.md) | PDF upload → Python extract/OCR → admin review (Redis+Horizon) |
 | M5 | [`m5-ai-expansion.md`](m5-ai-expansion.md) | AI bank top-up via local Ollama |
 
