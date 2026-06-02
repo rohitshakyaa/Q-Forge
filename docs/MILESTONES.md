@@ -430,9 +430,9 @@ first-class `papers` row (`origin=imported`) whose questions the engine then avo
 nullability change) and introduces a new semantic (institution-wide, historical repetition), so it
 is tracked and diagram-updated on its own rather than folded silently into M3 or M4.
 
-**Scope / deliverables** *(design only so far — no code yet)*
+**Scope / deliverables** *(delivered)*
 - *Schema:* `papers.blueprint_id` → **nullable**; add `papers.origin` enum `('generated','imported')`
-  default `generated`. No change to `paper_questions`. Update the M2/M3 ER diagrams on implementation.
+  default `generated`. No change to `paper_questions`. M2/M3 ER diagrams updated to match.
 - *Engine:* one query change in `PaperGenerator::lastNExclusion()` — the rolling last-N window
   becomes `where subject_id AND (owner_id = me OR origin = 'imported')`, ordered by `generated_at`.
   Pure rolling (imported exams age out normally); nothing else in the algorithm changes.

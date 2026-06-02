@@ -8,7 +8,12 @@ Horizon online.**
 
 ## Prerequisites
 
-**M1–M3 must be `Done`.** Confirm via the **Progress** table in `docs/MILESTONES.md`.
+**M1–M3 (incl. M3.1) are `Done`.** Confirm via the **Progress** table in `docs/MILESTONES.md`.
+
+**The Redis + Horizon infra is ALREADY set up** (done ahead of this milestone — see the Infra section
+below for exactly what exists). The queue is online; you do **not** need to install or configure it,
+only build on it. The Python container already ships the PDF/OCR libs (`tesseract-ocr`,
+`poppler-utils`, `pypdf`, `pdfplumber`, `pytesseract`, `Pillow`, `python-multipart`, `httpx`).
 
 ## Read first (orientation)
 
@@ -26,10 +31,20 @@ questions into the bank.
 
 ## Scope / deliverables
 
-**Infra (Laravel)**
-- Switch `QUEUE_CONNECTION=redis`, `REDIS_HOST=qforge_redis`; install `laravel/horizon` + `predis`
-  (`sudo docker compose exec qforge_app composer require …`); publish Horizon; ensure `qforge_worker`
-  runs `php artisan horizon`; gate `/horizon` to admins.
+**Infra (Laravel) — ALREADY DONE, do not redo; verify only.** What exists:
+- `code/.env`: `QUEUE_CONNECTION=redis`, `REDIS_CLIENT=predis`, `REDIS_HOST=qforge_redis`,
+  `REDIS_PORT=6379`, `REDIS_PASSWORD=null`.
+- `predis/predis` + `laravel/horizon` installed; `horizon:install` ran (published `config/horizon.php`
+  and `app/Providers/HorizonServiceProvider.php`, registered in `bootstrap/providers.php`).
+- `/horizon` gated to admins: `HorizonServiceProvider::gate()` returns `$user->role === 'admin'`.
+- `qforge_worker` runs `php artisan horizon` (plain `queue:work` disabled) via
+  `build/worker/supervisord.conf` — with `stopwaitsecs=3600` and `*_logfile_maxbytes=0` (the latter
+  silences supervisord's `/dev/stdout` "Illegal seek" warning).
+- Verified: `Redis::ping()` → PONG, a job dispatched on the `redis` connection is processed by
+  Horizon, `php artisan horizon:status` → running.
+- *Quick re-check:* `sudo docker compose exec qforge_app php artisan horizon:status`. If the worker
+  conf changed, `sudo docker compose restart qforge_worker`. **Note `phpredis` is NOT installed** —
+  this stack uses `predis`; keep `REDIS_CLIENT=predis`.
 
 **Python service (`python-service/`)** — processing only, no DB access.
 - `POST /extract`: input is a file path on the shared volume (`/shared-storage`, already mounted) +
@@ -65,7 +80,8 @@ questions into the bank.
 
 1. **Plan first.** Inspect `python-service/app/`, the existing `PythonService` wrapper, queue config,
    and the named frontend screens; present a short plan/todo; confirm before editing.
-2. Bring up Redis+Horizon → Python `/extract` → upload + job + review → frontend wiring.
+2. Redis+Horizon are already online (verify only) → build Python `/extract` → upload + job + review
+   → frontend wiring.
 3. Include tests (see Acceptance).
 
 ## Acceptance / verification
