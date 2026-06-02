@@ -16,6 +16,7 @@ class Paper extends Model
     protected $fillable = [
         'owner_id',
         'blueprint_id',
+        'origin',
         'subject_id',
         'name',
         'total_marks',

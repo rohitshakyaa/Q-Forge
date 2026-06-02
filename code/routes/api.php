@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Api\QuestionController;
 use App\Http\Controllers\Api\BlueprintController;
 use App\Http\Controllers\Api\PaperController;
+use App\Http\Controllers\Api\PastPaperController;
 use App\Services\PythonService;
 
 Route::get('/user', function (Request $request) {
@@ -72,6 +73,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('subjects', SubjectController::class)->except(['index', 'show']);
         Route::apiResource('subjects.units', UnitController::class)->shallow()->except(['index']);
         Route::apiResource('questions', QuestionController::class);
+        // M3.1 — record a real past exam as an imported paper (repetition source).
+        Route::post('subjects/{subject}/past-papers', [PastPaperController::class, 'store']);
     });
 
     // Teacher-only, owner-scoped blueprints + paper generation, lifecycle, export.

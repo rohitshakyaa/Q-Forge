@@ -144,6 +144,7 @@ class PaperController extends Controller
     {
         $papers = Paper::query()
             ->where('owner_id', $request->user()->id)
+            ->where('origin', 'generated')
             ->with('subject')
             ->withCount('paperQuestions')
             ->orderByDesc('generated_at')
@@ -205,12 +206,14 @@ class PaperController extends Controller
     {
         $userId = $request->user()->id;
 
-        $paperIds = Paper::where('owner_id', $userId)->pluck('id');
+        // Owner-scoped on generated papers only — imported past exams (admin-owned,
+        // origin=imported) never surface in a teacher's analytics.
+        $paperIds = Paper::where('owner_id', $userId)->where('origin', 'generated')->pluck('id');
         $usages = PaperQuestion::whereIn('paper_id', $paperIds);
 
         $questionsUsed = (clone $usages)->count();
         $uniqueQuestions = (clone $usages)->distinct('question_id')->count('question_id');
-        $totalExports = (int) Paper::where('owner_id', $userId)->sum('export_count');
+        $totalExports = (int) Paper::where('owner_id', $userId)->where('origin', 'generated')->sum('export_count');
 
         return response()->json([
             'generated' => $paperIds->count(),

@@ -3,6 +3,7 @@
 namespace Tests\Unit\PaperGeneration;
 
 use App\Models\Blueprint;
+use App\Models\Paper;
 use App\Models\Question;
 use App\Models\Subject;
 use App\Models\Unit;
@@ -268,5 +269,57 @@ class PaperGeneratorTest extends TestCase
         $coveredUnitIds = collect($result->selections)->map(fn (Question $q) => $q->unit_id)->unique();
         $this->assertEqualsCanonicalizing([$u1->id, $u2->id], $coveredUnitIds->all());
         $this->assertTrue($validator->allPass($result->constraintResults));
+    }
+
+    public function test_imported_exam_ages_out_of_the_rolling_window(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+
+        // Q1/Q2 are the "real exam" questions; F1 is filler so a newer paper can be
+        // recorded without re-spending Q1/Q2.
+        $this->seedQuestions($subject, $u1, 'short', 4, 3);
+        [$q1, $q2, $f1] = Question::where('subject_id', $subject->id)->orderBy('id')->get()->all();
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 1, 'marksEach' => 4],
+        ], ['Unit 1'], 4);
+        $definition = $blueprint->definition;
+        $definition['exclusionRules']['lastNPapers'] = 1;
+        $blueprint->update(['definition' => $definition]);
+
+        // An imported exam (admin-owned, subject-wide) claims Q1 and Q2.
+        $imported = Paper::factory()->imported()->create([
+            'owner_id' => User::factory()->state(['role' => 'admin']),
+            'subject_id' => $subject->id, 'generated_at' => now()->subYear(),
+        ]);
+        foreach ([$q1, $q2] as $i => $q) {
+            $imported->paperQuestions()->create([
+                'question_id' => $q->id, 'unit_id' => $u1->id,
+                'section_label' => 'Imported', 'display_no' => $i + 1, 'marks' => 4, 'is_ai' => false,
+            ]);
+        }
+
+        // While the imported exam is the newest in the window, Q1/Q2 are excluded → only F1 is picked.
+        $first = $this->generator()->generate($blueprint);
+        $this->assertTrue($first->satisfiable);
+        $this->assertSame([$f1->id], collect($first->selections)->map(fn (Question $q) => $q->id)->all());
+
+        // A newer owner-generated paper (spending F1) bumps the imported exam out of the size-1 window.
+        $newer = Paper::factory()->create([
+            'owner_id' => $blueprint->owner_id, 'blueprint_id' => $blueprint->id,
+            'subject_id' => $subject->id, 'origin' => 'generated', 'generated_at' => now(),
+        ]);
+        $newer->paperQuestions()->create([
+            'question_id' => $f1->id, 'unit_id' => $u1->id,
+            'section_label' => 'Section A', 'display_no' => 1, 'marks' => 4, 'is_ai' => false,
+        ]);
+
+        // Now the window holds only the newer paper; the imported exam aged out, so Q1/Q2 are eligible again.
+        $second = $this->generator()->generate($blueprint);
+        $this->assertTrue($second->satisfiable);
+        $chosen = collect($second->selections)->map(fn (Question $q) => $q->id)->all();
+        $this->assertCount(1, $chosen);
+        $this->assertContains($chosen[0], [$q1->id, $q2->id], 'Imported exam did not age out of the rolling window.');
     }
 }

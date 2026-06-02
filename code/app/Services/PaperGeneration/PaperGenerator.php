@@ -79,9 +79,15 @@ class PaperGenerator
             return null;
         }
 
+        // Rolling last-N window, subject-wide: my own generated papers PLUS any
+        // imported past exam (M3.1) for this subject — so a generated paper avoids
+        // questions that were on real historical exams, for every teacher. Imported
+        // papers age out normally (pure rolling; no special treatment).
         $recentPaperIds = Paper::query()
-            ->where('owner_id', $blueprint->owner_id)
             ->where('subject_id', $blueprint->subject_id)
+            ->where(fn (Builder $q) => $q
+                ->where('owner_id', $blueprint->owner_id)
+                ->orWhere('origin', 'imported'))
             ->orderByDesc('generated_at')
             ->orderByDesc('id')
             ->limit($compiled->lastNPapers)

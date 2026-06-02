@@ -20,7 +20,7 @@ class PaperFactory extends Factory
         $subject = Subject::factory();
 
         return [
-            'owner_id' => User::factory()->teacher(),
+            'owner_id' => User::factory()->state(['role' => 'teacher']),
             'blueprint_id' => Blueprint::factory()->for($subject),
             'subject_id' => $subject,
             'name' => fake()->words(3, true),
@@ -30,5 +30,18 @@ class PaperFactory extends Factory
             'export_count' => 0,
             'generated_at' => now(),
         ];
+    }
+
+    /**
+     * An imported past exam (M3.1): no blueprint, recorded as saved.
+     * Owner is the uploading admin; subject-wide repetition matches on origin.
+     */
+    public function imported(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'blueprint_id' => null,
+            'origin' => 'imported',
+            'status' => 'saved',
+        ]);
     }
 }

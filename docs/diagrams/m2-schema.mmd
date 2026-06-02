@@ -71,7 +71,8 @@ erDiagram
     PAPERS {
         bigint id PK
         bigint owner_id FK
-        bigint blueprint_id FK
+        bigint blueprint_id FK "nullable (M3.1)"
+        enum origin "generated|imported (M3.1)"
         bigint subject_id FK
         string name
         int total_marks
