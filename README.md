@@ -121,6 +121,48 @@ Used by the Python service.
 
 ## Getting Started
 
+### Quick setup (recommended)
+
+One command does the whole first-time install — copies the env files, builds the
+images, starts the stack, installs dependencies, and creates + seeds the database.
+
+**macOS / Linux**
+
+```bash
+git clone <your-repository-url>
+cd Q-Forge
+./setup-fresh.sh      # first-time install (wipes local volumes)
+```
+
+After pulling new code later (non-destructive — keeps your database):
+
+```bash
+./setup.sh
+```
+
+**Windows (Docker Desktop, cmd or PowerShell)**
+
+```bat
+git clone <your-repository-url>
+cd Q-Forge
+setup.bat             REM first-time install (wipes local volumes)
+```
+
+After pulling new code later (non-destructive):
+
+```bat
+update.bat
+```
+
+When it finishes it prints the local URLs and the demo logins
+(`admin@qforge.com` / `teacher@qforge.com`, password `password`).
+
+> **Prerequisites:** Docker + Docker Compose v2 (Docker Desktop on macOS/Windows).
+> Docker must be running before you start.
+
+The manual steps below do the same thing by hand if you prefer, or need to run a
+single stage.
+
 ### 1. Clone the repository
 
 ```bash
