@@ -58,4 +58,42 @@ class PythonService
 
         return $body['data'];
     }
+
+    /**
+     * Ask Python to author `count` candidate questions from a Laravel-assembled
+     * grounding block (M5). Returns the valid subset in `data` and any malformed
+     * items in `errors` — partial success is normal and never discarded.
+     *
+     * @return array{data: array<int, array<string, mixed>>, errors: array<int, string>}
+     *
+     * @throws RuntimeException when the service is unreachable or reports failure.
+     */
+    public function generateQuestions(string $grounding, string $type, int $marks, int $count): array
+    {
+        $response = $this->client()
+            ->timeout((int) config('services.python.generate_timeout'))
+            ->post('/generate-questions', [
+                'grounding' => $grounding,
+                'type' => $type,
+                'marks' => $marks,
+                'count' => $count,
+            ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException("python /generate-questions returned HTTP {$response->status()}");
+        }
+
+        $body = $response->json();
+
+        if (($body['status'] ?? null) !== 'success') {
+            $errors = $body['errors'] ?? ['python /generate-questions reported an unknown error'];
+
+            throw new RuntimeException(implode('; ', $errors));
+        }
+
+        return [
+            'data' => $body['data'] ?? [],
+            'errors' => $body['errors'] ?? [],
+        ];
+    }
 }

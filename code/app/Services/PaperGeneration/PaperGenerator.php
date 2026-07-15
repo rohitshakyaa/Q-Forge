@@ -189,16 +189,25 @@ class PaperGenerator
         foreach ($groups as $group) {
             /** @var Slot $slot */
             $slot = $group['slot'];
-            $available = ($candidatesBySlot[$slot->index] ?? collect())->count();
-            $deficit = $group['required'] - $available;
+            $pool = $candidatesBySlot[$slot->index] ?? collect();
+            $deficit = $group['required'] - $pool->count();
 
             if ($deficit > 0) {
+                // Enrich the shortfall with a concrete unit id for the M5 top-up. On a
+                // unit-restricted blueprint an AI question must land on an allowed unit
+                // or CandidateFilter's whereIn(unit_id) hides it; target the allowed
+                // unit with the fewest matching approved questions so we fill the real
+                // gap (a unit with zero approved questions is thus preferred). An
+                // unrestricted blueprint keeps unitId null (no unit filter applies).
+                $targetUnitId = $this->leastPopulatedAllowedUnit($compiled, $pool);
+
                 $missing[] = new MissingSlot(
                     sectionLabel: $slot->sectionLabel,
                     type: $slot->type,
                     marks: $slot->marks,
-                    unit: null,
+                    unit: $targetUnitId !== null ? ($compiled->unitNames[$targetUnitId] ?? null) : null,
                     need: $deficit,
+                    unitId: $targetUnitId,
                 );
             }
         }
@@ -219,9 +228,34 @@ class PaperGenerator
                 marks: $firstSlot?->marks ?? 0,
                 unit: $compiled->unitNames[$unitId] ?? "Unit {$unitId}",
                 need: 1,
+                unitId: $unitId,
             );
         }
 
         return $missing;
+    }
+
+    /**
+     * The allowed unit with the fewest matching approved questions in the candidate
+     * pool, or null when the blueprint imposes no unit restriction. Units with zero
+     * approved questions (absent from the pool) count as 0 and so win. Deterministic
+     * tie-break by ascending unit id.
+     *
+     * @param  Collection<int, Question>  $pool
+     */
+    private function leastPopulatedAllowedUnit(CompiledBlueprint $compiled, Collection $pool): ?int
+    {
+        if (empty($compiled->allowedUnitIds)) {
+            return null;
+        }
+
+        $countsByUnit = $pool->groupBy('unit_id')->map->count();
+
+        $allowed = $compiled->allowedUnitIds;
+        sort($allowed);
+
+        return collect($allowed)
+            ->sortBy(fn (int $unitId) => $countsByUnit->get($unitId, 0))
+            ->first();
     }
 }

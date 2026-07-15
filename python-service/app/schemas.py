@@ -1,6 +1,6 @@
 from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 DocumentType = Literal["syllabus", "past_paper"]
 QuestionType = Literal["short", "long", "mcq"]
@@ -77,3 +77,37 @@ class ExtractData(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
     courses: list[Course] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class GenerateQuestionsRequest(BaseModel):
+    """Input to `/generate-questions`.
+
+    `grounding` is the block Laravel assembled by primary key (unit + subject syllabus
+    + exemplars) — this service does no retrieval and no DB access, it only writes text.
+    """
+
+    grounding: str
+    type: QuestionType
+    marks: int
+    count: int = Field(ge=1, le=25)
+
+
+class GeneratedQuestion(BaseModel):
+    """One AI-authored question. `type`/`marks` are echoed by the model as a sanity
+    signal — Laravel is authoritative and re-stamps them from the target slot."""
+
+    text: str = Field(min_length=1)
+    type: QuestionType
+    marks: int
+    # MCQ only: the choices and the correct answer.
+    options: list[str] | None = None
+    answer: str | None = None
+
+    @model_validator(mode="after")
+    def _mcq_needs_choices(self) -> "GeneratedQuestion":
+        if self.type == "mcq":
+            if not self.options or len(self.options) < 2:
+                raise ValueError("an mcq needs at least two options")
+            if not self.answer:
+                raise ValueError("an mcq needs an answer")
+        return self

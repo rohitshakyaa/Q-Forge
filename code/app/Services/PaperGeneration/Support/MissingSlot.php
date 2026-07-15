@@ -15,6 +15,10 @@ class MissingSlot
         public readonly int $marks,
         public readonly ?string $unit,
         public readonly int $need,
+        // Server-set unit id the AI top-up (M5) should target, or null when the slot
+        // has no unit (unrestricted blueprint). Carried here because the generator
+        // already knows it — the job must not reverse-parse the `unit` name string.
+        public readonly ?int $unitId = null,
     ) {
     }
 
@@ -33,6 +37,7 @@ class MissingSlot
             'type' => $this->type,
             'marks' => $this->marks,
             'unit' => $this->unit,
+            'unit_id' => $this->unitId,
             'need' => $this->need,
             'description' => $this->describe(),
         ];

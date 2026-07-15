@@ -55,6 +55,15 @@ const openPaper = () => {
   if (id) router.push(`/teacher/paper/${id}`);
 };
 
+// M5 — top up the bank with AI, then regenerate. Stays on the results panel so the
+// teacher watches status and lands on either a paper or a smaller shortfall.
+const expandWithAi = async () => {
+  if (!selectedBP.value) return;
+  phase.value = 'generating';
+  await papersStore.expandBank(selectedBP.value.id);
+  phase.value = 'done';
+};
+
 const passedCount = computed(() => papersStore.constraints.filter((c) => c.pass === true).length);
 const totalConstraints = computed(() => papersStore.constraints.length);
 
@@ -443,12 +452,43 @@ const unitBreakdown = (bp: Blueprint) =>
             <div class="font-semibold text-danger mb-[2px]">
               Cannot satisfy this blueprint
             </div>
-            <div class="text-[13px] text-text2">
+            <!-- Structural shortfall (coverage needs more units than questions): AI
+                 can't help, so explain how to fix the blueprint instead. -->
+            <div v-if="papersStore.shortfallReason" class="text-[13px] text-text2">
+              {{ papersStore.shortfallReason }}
+            </div>
+            <div v-else class="text-[13px] text-text2">
               The question bank is too thin. {{ passedCount }}/{{ totalConstraints }} constraints met.
               Add questions to the bank for the slots below, then try again.
             </div>
           </div>
-          <QFButton variant="secondary" size="sm" @click="phase = 'select'">← Back</QFButton>
+          <div class="flex gap-2">
+            <QFButton
+              v-if="papersStore.expandable"
+              variant="primary"
+              size="sm"
+              :disabled="papersStore.expanding"
+              @click="expandWithAi"
+            >
+              {{ papersStore.expanding ? 'Expanding…' : '✨ Expand bank with AI' }}
+            </QFButton>
+            <QFButton
+              v-else
+              variant="primary"
+              size="sm"
+              @click="router.push(`/teacher/blueprint/${selectedBP?.id}`)"
+            >
+              Edit blueprint →
+            </QFButton>
+            <QFButton variant="secondary" size="sm" @click="phase = 'select'">← Back</QFButton>
+          </div>
+        </div>
+        <div
+          v-if="papersStore.expandStatus"
+          class="text-[13px] text-text2"
+          style="display: flex; align-items: center; gap: 8px"
+        >
+          <span class="text-indigo">✨</span>{{ papersStore.expandStatus }}
         </div>
         <div
           v-if="papersStore.missingSlots.length"

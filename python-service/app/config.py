@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,16 @@ class Settings(BaseSettings):
     ocr_dpi: int = 300
 
     ocr_language: str = "eng"
+
+    # M5 — LLM provider for /generate-questions. These read the plain, unprefixed
+    # env names (OLLAMA_URL, ...) via validation_alias, matching docker-compose and
+    # PLAN.md, rather than the QFORGE_ prefix the rest of the settings use.
+    llm_provider: str = Field("ollama", validation_alias="LLM_PROVIDER")
+    ollama_url: str = Field("http://qforge_ollama:11434", validation_alias="OLLAMA_URL")
+    ollama_model: str = Field("qwen2.5:3b-instruct", validation_alias="OLLAMA_MODEL")
+    # When true, log the exact prompt sent to the model and its raw response, so the
+    # generation can be inspected in `docker compose logs qforge_python`.
+    llm_debug: bool = Field(False, validation_alias="LLM_DEBUG")
 
 
 @lru_cache

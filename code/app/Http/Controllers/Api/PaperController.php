@@ -45,6 +45,11 @@ class PaperController extends Controller
         if (! $result->satisfiable) {
             return response()->json([
                 'satisfiable' => false,
+                // AI bank expansion adds questions, not slots, so it can only help when
+                // the shortfall is about bank contents — never when coverage needs more
+                // units than the blueprint has questions.
+                'expandable' => ! $result->coverageStructurallyInfeasible(),
+                'shortfall_reason' => $result->coverageDeficitMessage(),
                 'paper' => $this->partialPaperPayload($blueprint, $result),
                 'missing_slots' => $result->missingSlotsArray(),
                 'constraint_results' => $result->constraintResultsArray(),

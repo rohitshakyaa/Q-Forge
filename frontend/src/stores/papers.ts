@@ -41,8 +41,26 @@ export interface MissingSlot {
   type: string;
   marks: number;
   unit: string | null;
+  unit_id: number | null;
   need: number;
   description: string;
+}
+
+interface ExpandResponse {
+  satisfiable: boolean;
+  expandable?: boolean;
+  shortfall_reason?: string | null;
+  jobId?: string;
+  message?: string;
+}
+
+interface JobStatus {
+  id: string;
+  status: 'processing' | 'finished' | 'failed' | 'cancelled';
+  total: number;
+  pending: number;
+  failed: number;
+  progress: number;
 }
 
 interface ApiPaper {
@@ -60,6 +78,8 @@ interface ApiPaper {
 
 interface GenerateResponse {
   satisfiable: boolean;
+  expandable?: boolean;
+  shortfall_reason?: string | null;
   paper: ApiPaper;
   constraint_results: ConstraintResult[];
   missing_slots?: MissingSlot[];
@@ -113,6 +133,14 @@ export const usePapersStore = defineStore('papers', () => {
   const missingSlots = ref<MissingSlot[]>([]);
   const error = ref<string | null>(null);
 
+  // M5 — AI bank expansion progress for the Generate screen. `expandable` is false
+  // when the shortfall is structural (coverage needs more units than there are
+  // questions), where AI can't help; `shortfallReason` carries the explanation.
+  const expanding = ref(false);
+  const expandStatus = ref<string | null>(null);
+  const expandable = ref(true);
+  const shortfallReason = ref<string | null>(null);
+
   const list = computed(() => items.value);
   const recent = computed(() => [...items.value].slice(0, 3));
 
@@ -146,6 +174,8 @@ export const usePapersStore = defineStore('papers', () => {
       constraints.value = data.constraint_results ?? [];
       missingSlots.value = data.missing_slots ?? [];
       satisfiable.value = data.satisfiable;
+      expandable.value = data.expandable ?? true;
+      shortfallReason.value = data.shortfall_reason ?? null;
 
       if (data.satisfiable && paper.id !== null) {
         items.value = [paper, ...items.value.filter((p) => p.id !== paper.id)];
@@ -168,7 +198,73 @@ export const usePapersStore = defineStore('papers', () => {
     missingSlots.value = [];
     current.value = null;
     error.value = null;
+    expanding.value = false;
+    expandStatus.value = null;
+    expandable.value = true;
+    shortfallReason.value = null;
   };
+
+  /** Poll a batch's status until it finishes or fails (or we give up). */
+  async function pollJob(jobId: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      const { data } = await api.get<JobStatus>(`/jobs/${jobId}`);
+      if (data.status === 'finished') return true;
+      if (data.status === 'failed' || data.status === 'cancelled') return false;
+      expandStatus.value = `Generating questions… ${data.progress}%`;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    return false;
+  }
+
+  /**
+   * M5: when a blueprint is infeasible, ask the backend to top up the bank with the
+   * local LLM, wait for the queued job, then re-generate. The backend re-derives the
+   * shortfall itself, so we only need the blueprint id (already held by the screen).
+   */
+  async function expandBank(blueprintId: number): Promise<boolean> {
+    expanding.value = true;
+    expandStatus.value = 'Requesting AI-generated questions…';
+    error.value = null;
+
+    try {
+      const { data } = await api.post<ExpandResponse>(`/blueprints/${blueprintId}/expand-bank`, {});
+
+      // Structural shortfall the backend refused to expand — AI can't add slots.
+      if (data.expandable === false) {
+        expandable.value = false;
+        shortfallReason.value = data.shortfall_reason ?? null;
+        expandStatus.value = null;
+        return false;
+      }
+
+      // Already satisfiable server-side (e.g. bank changed since the last attempt).
+      if (data.satisfiable || !data.jobId) {
+        expandStatus.value = 'Bank is sufficient — regenerating…';
+        const ok = await generate(blueprintId);
+        expandStatus.value = null;
+        return ok;
+      }
+
+      const finished = await pollJob(data.jobId);
+      if (!finished) {
+        expandStatus.value = 'AI generation did not complete — try again.';
+        return false;
+      }
+
+      expandStatus.value = 'Questions added to the bank — regenerating…';
+      const ok = await generate(blueprintId);
+      // Clear the transient status so the fresh result (success or a new shortfall)
+      // isn't overlaid by a stale "regenerating…" line.
+      expandStatus.value = null;
+      return ok;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'AI expansion failed';
+      expandStatus.value = null;
+      return false;
+    } finally {
+      expanding.value = false;
+    }
+  }
 
   /** Load the authenticated teacher's paper history (list rows, no sections). */
   async function fetchHistory(): Promise<void> {
@@ -258,7 +354,12 @@ export const usePapersStore = defineStore('papers', () => {
     constraints,
     missingSlots,
     error,
+    expanding,
+    expandStatus,
+    expandable,
+    shortfallReason,
     generate,
+    expandBank,
     resetGeneration,
     fetchHistory,
     fetchById,

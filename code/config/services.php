@@ -44,6 +44,9 @@ return [
 
         // Extraction OCRs every scanned page; it is not a fast request.
         'extract_timeout' => (int) env('PYTHON_EXTRACT_TIMEOUT', 600),
+
+        // AI generation calls a local LLM (CPU-only), so give it generous headroom.
+        'generate_timeout' => (int) env('PYTHON_GENERATE_TIMEOUT', 300),
     ],
 
 ];

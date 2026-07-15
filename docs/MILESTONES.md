@@ -38,7 +38,7 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 | M3.1 — Imported past papers | Done | Real exams recorded as `papers` rows (`origin=imported`, nullable `blueprint_id`) via admin-only `POST /subjects/{subject}/past-papers` → `ImportedPaperService`. `PaperGenerator::lastNExclusion` window is now subject-wide (`owner_id = me OR origin = imported`), pure rolling. History/analytics filtered to `origin=generated`. 46 tests green (+10). See [`adr/0001-imported-past-papers.md`](adr/0001-imported-past-papers.md). |
 | M4 — PDF pipeline | Done | Python `POST /extract` (pdfplumber + per-page Tesseract OCR fallback + heuristic parser) in `python-service/app/`; `document_uploads` + `ProcessDocumentUpload` on Redis/Horizon; `POST/GET/DELETE /uploads`; review queue (`approve`/`reject` + bulk) gated so a candidate missing a unit or marks cannot be approved. `questions.unit_id`/`marks` now nullable. 89 Laravel tests (+43) and 51 pytest tests green. Upload + Review Queue screens wired to the live API. |
 | M4.1 — Syllabus import | Done | Python `services/syllabus.py` parses a syllabus into courses + units (`number`, `name`, `hours`, markdown `content`) and returns them as `courses[]` from `/extract`; staged in `document_uploads.meta.courses`; admin confirms at `/admin/syllabus/:uploadId`; transactional `POST /uploads/{id}/import` → `SyllabusImporter`. New `units.hours` + `units.content`; `subjects.syllabus` now holds the course as markdown (M5's corpus). Import is additive and idempotent — it never deletes a unit, because `questions.unit_id` cascades. 112 Laravel tests (+23) and 97 pytest (+30) green. See [`adr/0002-syllabus-import.md`](adr/0002-syllabus-import.md). |
-| M5 — AI bank expansion | Not started | |
+| M5 — AI bank expansion | Done | `qforge_ollama` (Ollama, `qwen2.5:3b-instruct`, auto-pull entrypoint) on `local`; Python `POST /generate-questions` + `LLMProvider` (`OllamaProvider` default + `StubProvider`, env-selected). Laravel **`POST /blueprints/{id}/expand-bank`** (owner-scoped; re-derives `missing_slots` server-side) → `Bus::batch(ExpandQuestionBank)` → `{ jobId }`; poll `GET /jobs/{batchId}`. Job grounds each slot (`units.content`/`subjects.syllabus` + ≤3 approved exemplars), calls Python for `need+2`, stamps `type`/`marks` from the slot, resolves `unit_id`, stores `source=ai, status=approved`. `MissingSlot` enriched with server-set `unitId` (UnitResolver not used — it parses "Unit N" headings, not names). Tests green (stub provider). Generate screen "Expand bank with AI" wired. |
 
 ---
 
@@ -650,19 +650,40 @@ that subject now tags itself instead of landing in *Unassigned*.
 
 ## M5 — AI bank expansion
 
-**Status:** Not started
+**Status:** Done
 
 **Goal:** When the bank can't satisfy a blueprint, top it up with the local LLM and regenerate —
 AI as a supportive component under the algorithm's control.
 
+> **Reconciled with the post-M2–M4 code (three corrections to earlier drafts):**
+> 1. **Blueprint-keyed, not paper-keyed.** An infeasible `generate` persists *nothing*
+>    (`PaperController::generate` returns an id-less partial on the `!satisfiable` branch), so there
+>    is no `paper.id` to target. The endpoint is **`POST /blueprints/{id}/expand-bank`**. It
+>    re-derives `missing_slots` server-side by re-running the generator (side-effect-free), never
+>    trusting client state.
+> 2. **AI questions are stored `status=approved`, not `pending`.** `CandidateFilter` selects
+>    `where('status','approved')`; a `pending` question is invisible to the generator, so the
+>    regenerate demo would silently still fail. AI questions are stored `source=ai, status=approved`
+>    — immediately usable, and *audited* by filtering `?source=ai` (not via the M4 pending queue).
+> 3. **`MissingSlot` carries a server-set `unitId`; `UnitResolver` is not used here.** `UnitResolver`
+>    only parses printed headings ("Unit 3", "Unit-III") — but a `MissingSlot` carries either a unit
+>    *name* (coverage branch) or `null` (supply-deficit branch), neither of which it can resolve. The
+>    generator already knows the unit id, so `computeMissingSlots` sets `unitId` directly. On a
+>    unit-restricted blueprint the supply-deficit branch emits one slot per **least-populated allowed
+>    unit** so every AI question lands on an allowed `unit_id` (else it stays invisible to the filter).
+
 **Scope / deliverables**
-- *Infra:* add `qforge_ollama` container (small instruct model, e.g. Qwen2.5/Llama 3.1 8B), model
-  volume, on the `local` network; `OLLAMA_URL` to the Python service.
-- *Python:* `POST /generate-questions` + `LLMProvider` interface (`OllamaProvider` default + stub),
-  returns structured candidate questions.
-- *Backend:* `POST /papers/{id}/expand-bank` dispatches `ExpandQuestionBank` for the named missing
-  slots; validates generated questions and stores them as `questions` (`source=ai`, immediately
-  usable, flagged for optional admin audit); teacher re-runs generate.
+- *Infra:* add `qforge_ollama` container (`ollama/ollama`, default `qwen2.5:3b-instruct`), a named
+  model-weights volume, on the `local` network; an entrypoint that `serve`s then pulls the model
+  once. `OLLAMA_URL`/`OLLAMA_MODEL` + a `LLM_PROVIDER` toggle to the Python service.
+- *Python:* `POST /generate-questions` + `LLMProvider` interface (`OllamaProvider` default +
+  `StubProvider`, env-selected), returns `{status, data, errors}` with the valid subset in `data`
+  and malformed items in `errors`.
+- *Backend:* **`POST /blueprints/{id}/expand-bank`** (owner-scoped) re-derives the shortfall and, if
+  still infeasible, dispatches `ExpandQuestionBank` inside a `Bus::batch` → `{ jobId }`. The job
+  grounds each missing slot (`units.content` + `subjects.syllabus` + ≤3 approved exemplars), calls
+  Python for `need + buffer`, validates + stamps `type`/`marks` from the slot, resolves `unit_id`,
+  and stores survivors `source=ai, status=approved`. `GET /jobs/{batchId}` exposes batch status.
 - *Frontend wiring:* the "Expand bank with AI" action on the Generate screen + status feedback.
 
 **Database after M5** — **Schema unchanged since M4.** AI questions are ordinary `questions` rows
@@ -692,17 +713,23 @@ erDiagram
 ```
 
 **API endpoints added**
-- `POST /papers/{id}/expand-bank` → `{ jobId }` (poll status, then re-`generate`)
+- `POST /blueprints/{id}/expand-bank` → `{ satisfiable, jobId? }` (re-derives the shortfall; when
+  already satisfiable returns `satisfiable:true` and no job; otherwise dispatches the batch and
+  returns its `jobId` — poll, then re-`generate`)
+- `GET /jobs/{batchId}` → batch status `{ id, status, progress, total, pending, failed }`
 
 **Displayable product:** Teacher hits an infeasible blueprint → clicks "Expand bank with AI" →
 job runs (Horizon) → new questions appear in the bank flagged AI → re-generate now succeeds, with
 AI-sourced questions marked in the paper.
 
 **Acceptance / verification**
-- Python pytest with the stub provider: `/generate-questions` returns valid structured questions.
-- Feature test: expand-bank job inserts `source=ai` questions; a previously infeasible blueprint
-  becomes satisfiable afterward.
-- End-to-end with `qforge_ollama` up: infeasible → expand → regenerate succeeds.
+- Python pytest with the stub provider: `/generate-questions` returns valid structured questions; a
+  malformed item lands in `errors`, not `data`.
+- Feature test: `POST /blueprints/{id}/expand-bank` dispatches the batch; the job inserts
+  `source=ai, status=approved` questions with a resolved `unit_id` + `marks`; a previously infeasible
+  blueprint becomes satisfiable on re-`generate`; another owner's blueprint → 403.
+- End-to-end with `qforge_ollama` up: infeasible → "Expand bank with AI" → job runs in `/horizon` →
+  regenerate succeeds, AI-sourced questions marked in the paper.
 
 ---
 

@@ -93,6 +93,28 @@ services:
       - ./code/storage/app:/shared-storage
     environment:
       - PYTHONUNBUFFERED=1
+      # M5: local LLM for AI bank expansion. Frontend → Laravel → Python → Ollama.
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OLLAMA_URL=${OLLAMA_URL:-http://qforge_ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      - LLM_DEBUG=${LLM_DEBUG:-false}
+    depends_on:
+      - qforge_ollama
+    networks:
+      - local
+
+  qforge_ollama:
+    image: ollama/ollama
+    container_name: ${CONTAINER_NAME_PREFIX}ollama
+    restart: unless-stopped
+    # Custom entrypoint: start `ollama serve`, then pull the model once into the
+    # named volume so `docker compose up` is demo-ready without a manual pull.
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+    volumes:
+      - qforge_ollama_data:/root/.ollama
+      - ./build/ollama/entrypoint.sh:/entrypoint.sh:ro
     networks:
       - local
 
@@ -142,3 +164,5 @@ networks:
 volumes:
   qforge_db_data:
     name: ${CONTAINER_NAME_PREFIX}db
+  qforge_ollama_data:
+    name: ${CONTAINER_NAME_PREFIX}ollama

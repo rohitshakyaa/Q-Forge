@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\SubjectController;
 use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Api\QuestionController;
 use App\Http\Controllers\Api\BlueprintController;
+use App\Http\Controllers\Api\BankExpansionController;
 use App\Http\Controllers\Api\PaperController;
 use App\Http\Controllers\Api\PastPaperController;
 use App\Http\Controllers\Api\DocumentUploadController;
@@ -97,6 +98,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Teacher-only, owner-scoped blueprints + paper generation, lifecycle, export.
     Route::middleware('role:teacher')->group(function () {
         Route::apiResource('blueprints', BlueprintController::class);
+        // M5 — AI bank expansion for an infeasible blueprint (re-derives the shortfall
+        // server-side), then batch-status polling for the dispatched job.
+        Route::post('blueprints/{blueprint}/expand-bank', [BankExpansionController::class, 'expand']);
+        Route::get('jobs/{batchId}', [BankExpansionController::class, 'jobStatus']);
         Route::post('papers/generate', [PaperController::class, 'generate']);
         // Static segments before the {paper} wildcard so they aren't swallowed by it.
         Route::get('papers/analytics', [PaperController::class, 'analytics']);

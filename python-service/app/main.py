@@ -1,9 +1,21 @@
 import logging
 
 from fastapi import FastAPI
+from pydantic import ValidationError
 
-from .schemas import Envelope, ExtractData, ExtractRequest
+# Surface app INFO logs (e.g. the LLM prompt/response dump when LLM_DEBUG=1) in the
+# container output; without a root handler, app loggers only emit WARNING and above.
+logging.basicConfig(level=logging.INFO)
+
+from .schemas import (
+    Envelope,
+    ExtractData,
+    ExtractRequest,
+    GeneratedQuestion,
+    GenerateQuestionsRequest,
+)
 from .services import parser, pdf, syllabus
+from .services.llm import get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -50,3 +62,41 @@ def extract(request: ExtractRequest) -> Envelope[ExtractData]:
             },
         )
     )
+
+
+@app.post("/generate-questions", response_model=Envelope[list[GeneratedQuestion]])
+def generate_questions(
+    request: GenerateQuestionsRequest,
+) -> Envelope[list[GeneratedQuestion]]:
+    """Write candidate questions from a Laravel-assembled grounding block.
+
+    Processing only: no retrieval, no DB. The valid subset comes back in `data` and
+    every malformed item in `errors` — one bad item never discards the whole batch.
+    Laravel validates against the slot, resolves the unit, and persists.
+    """
+    provider = get_provider()
+
+    try:
+        raw_items = provider.generate(
+            grounding=request.grounding,
+            type=request.type,
+            marks=request.marks,
+            count=request.count,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface the reason, never 500 the caller
+        logger.exception("generation failed")
+        return Envelope.fail(f"generation failed: {exc}")
+
+    valid: list[GeneratedQuestion] = []
+    errors: list[str] = []
+
+    for index, item in enumerate(raw_items):
+        try:
+            valid.append(GeneratedQuestion.model_validate(item))
+        except ValidationError as exc:
+            reason = "; ".join(e["msg"] for e in exc.errors()) or "invalid question"
+            errors.append(f"item {index}: {reason}")
+
+    # Partial success is still success: the caller reads `data` for what to store and
+    # logs `errors`. Only a provider-level failure (above) is reported as an error.
+    return Envelope(status="success", data=valid, errors=errors)

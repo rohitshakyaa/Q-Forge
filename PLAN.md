@@ -68,7 +68,7 @@ Matches the contract the frontend already assumes.
 **Teacher (`role:teacher`)**
 - `apiResource blueprints` (owner-scoped)
 - `POST /papers/generate` → body `{ blueprint_id }` → runs algorithm synchronously → returns either the full paper + `constraint_results[]`, or `{ satisfiable:false, missing_slots:[...] }`
-- `POST /papers/{id}/expand-bank` → dispatches `ExpandQuestionBank` job (Ollama) for the named missing slots → `{ jobId }`; poll via `GET /jobs/{id}` or re-`generate`
+- `POST /blueprints/{id}/expand-bank` → re-derives the blueprint's `missing_slots` server-side (an infeasible `generate` persists nothing, so there is no paper to key on); if still infeasible, dispatches `ExpandQuestionBank` inside a `Bus::batch` (Ollama) for the named missing slots → `{ satisfiable, jobId? }`; poll via `GET /jobs/{batchId}`, then re-`generate`. AI questions are stored `status=approved` (not `pending`) so the generator's `CandidateFilter` (`where status=approved`) can actually select them; they are audited via `?source=ai`.
 - `apiResource papers` (owner-scoped) + `GET /papers/{id}`
 - `GET /papers/{id}/export?format=pdf|docx`
 
@@ -89,7 +89,7 @@ A self-contained, framework-light service so it is unit-testable in isolation:
 - `GreedySelector` — fills each slot picking the best candidate, prioritizing unit balance, least-recently-used (lowest `used_count`/oldest usage), and optional attribute match.
 - `ConstraintValidator` — checks count per group, total marks, unit-coverage rule, no repetition (within paper + across last N), optional attribute constraints. Returns structured pass/fail per constraint (feeds the frontend `ConstraintResult[]`).
 - `BacktrackingResolver` — on validation failure (esp. unit coverage / exhausted candidates), reverses recent selections and tries alternative candidates per conflicting slot until valid or candidates exhausted.
-- `PaperGenerator` (facade) — orchestrates the above; returns a `GenerationResult` (success + paper draft, or failure + `missing_slots` describing exactly what the bank lacks, e.g. "2× 10-mark, Unit 3").
+- `PaperGenerator` (facade) — orchestrates the above; returns a `GenerationResult` (success + paper draft, or failure + `missing_slots` describing exactly what the bank lacks, e.g. "2× 10-mark, Unit 3"). Each `MissingSlot` also carries a server-set nullable `unitId` (the generator already knows it) so the M5 expansion job targets an allowed `unit_id` without re-parsing a name — `UnitResolver` is for printed PDF headings, not this.
 
 **Tests** (`tests/Unit/PaperGeneration/`): feasible blueprint → valid paper; unit-coverage enforcement; repetition exclusion across last N papers; infeasible blueprint → correct `missing_slots`; backtracking recovers a solvable-but-greedy-fails case. These tests *are* the proof of the academic contribution.
 
@@ -104,7 +104,7 @@ abstraction), `schemas.py`.
 Endpoints (all return `{status, data, errors}` per CLAUDE.md):
 - `GET /health` (exists)
 - `POST /extract` — input: file path on the shared volume (`/shared-storage`, already mounted) + type. Runs pdfplumber/pypdf; per-page OCR fallback via pytesseract. A `past_paper` returns `candidates[]` — the heuristic parser's question blocks with detected `marks`/`type`/`unit?`. A `syllabus` returns `courses[]` — course code/name/description plus units (`number`, `name`, `hours`, markdown `content`), each course rendered as one markdown document. **No DB access** — Laravel persists them.
-- `POST /generate-questions` — input: subject/unit context, target type+marks, count, optional syllabus/past-question snippets. Calls `LLMProvider` (Ollama) → returns structured candidate questions for Laravel to validate + store.
+- `POST /generate-questions` — input: the **Laravel-assembled grounding block** (unit + subject syllabus + ≤3 exemplars, joined by primary key — deterministic SQL retrieval, no embeddings/vector store) + target type+marks + count. Calls `LLMProvider` (Ollama) → returns `{status, data, errors}`: the valid candidate questions in `data`, malformed items in `errors` (never all-or-nothing on one bad item). No DB access, no retrieval — Laravel validates + stores.
 
 `LLMProvider` interface with `OllamaProvider` (default) + a stub provider, selected by env, so the
 model is swappable without touching call sites.
@@ -118,7 +118,7 @@ needed — call its REST API with httpx). `pdfplumber`, `pypdf`, `pytesseract`, 
 
 - **`docker-compose.yml`**: add `qforge_ollama` service (image `ollama/ollama`, volume for model weights, on `local` network). Add `OLLAMA_URL` env to the Python service. Ensure `qforge_worker` runs `php artisan horizon`.
 - **Laravel**: `composer require laravel/horizon predis/predis barryvdh/laravel-dompdf phpoffice/phpword`; set `QUEUE_CONNECTION=redis`, `REDIS_HOST=qforge_redis`; publish Horizon config; gate `/horizon` to admins.
-- **Jobs** (`app/Jobs/`): `ProcessDocumentUpload` (calls Python `/extract`, stores pending questions) and `ExpandQuestionBank` (calls Python `/generate-questions`, validates, stores). AI questions stored `source=ai`, immediately usable but flagged for optional admin audit in the review queue.
+- **Jobs** (`app/Jobs/`): `ProcessDocumentUpload` (calls Python `/extract`, stores pending questions) and `ExpandQuestionBank` (calls Python `/generate-questions`, validates, stores). AI questions stored `source=ai, status=approved` — immediately usable (a `pending` AI question would be invisible to `CandidateFilter` and defeat the regenerate demo); audited via `?source=ai`, not the M4 pending review queue.
 - **`PythonService`** (`app/Services/PythonService.php`): thin wrapper using `Http::baseUrl(config('services.python.base_url'))` — no hardcoded URLs.
 
 ---
@@ -134,7 +134,7 @@ needed — call its REST API with httpx). `pdfplumber`, `pypdf`, `pytesseract`, 
 - **M2 — The algorithm (centerpiece).** `app/Services/PaperGeneration/*`, `POST /papers/generate`, `papers` + `paper_questions` persistence, `ConstraintResult` output, full unit-test suite. Built entirely on seeded questions. *Demo:* generate a valid paper from a blueprint; show constraint pass/fail; show `missing_slots` on an infeasible blueprint.
 - **M3 — Papers lifecycle + export.** Repetition tracking via `paper_questions` (exclude-last-N), paper history endpoints, dompdf + PhpWord export from a shared view-model. *Demo:* generate → preview → export PDF/DOCX → second generation excludes prior questions.
 - **M4 — PDF pipeline.** Redis+Horizon online; Python `/extract` (digital + OCR fallback + heuristic parser); `POST /uploads`, `ProcessDocumentUpload` job, admin review/approve/reject. *Demo:* upload a past-paper PDF → watch job in Horizon → review queue → approve into bank → use in generation.
-- **M5 — AI bank expansion.** `qforge_ollama` container, Python `/generate-questions` + `LLMProvider`, `ExpandQuestionBank` job, `POST /papers/{id}/expand-bank`, generate→short→expand→regenerate loop. *Demo:* infeasible blueprint → AI tops up bank → regenerate succeeds.
+- **M5 — AI bank expansion.** `qforge_ollama` container, Python `/generate-questions` + `LLMProvider`, `ExpandQuestionBank` job, `POST /blueprints/{id}/expand-bank`, generate→short→expand→regenerate loop. *Demo:* infeasible blueprint → AI tops up bank → regenerate succeeds.
 
 ---
 
