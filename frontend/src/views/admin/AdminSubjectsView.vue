@@ -57,6 +57,9 @@ const totalQuestions = (s: Subject) => s.questionsCount ?? s.units.flatMap((u) =
       ]"
     >
       <template #actions>
+        <QFButton variant="secondary" @click="router.push('/admin/upload')">
+          ⬆ Import from syllabus
+        </QFButton>
         <QFButton variant="primary" @click="showAdd = true">+ New Subject</QFButton>
       </template>
     </QFPageHeader>

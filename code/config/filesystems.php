@@ -38,6 +38,17 @@ return [
             'report' => false,
         ],
 
+        /*
+         * Uploaded documents live here because this directory is bind-mounted into
+         * the Python container (docker-compose.yml maps ./code/storage/app to
+         * /shared-storage). Laravel writes the file; Python reads it back by path.
+         */
+        'shared' => [
+            'driver' => 'local',
+            'root' => storage_path('app/shared'),
+            'throw' => true,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

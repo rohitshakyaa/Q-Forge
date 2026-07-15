@@ -36,7 +36,8 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 | M2 — The algorithm (centerpiece) | Done | Greedy+backtracking engine in `app/Services/PaperGeneration/`, `POST /papers/generate`, papers/paper_questions persistence, constraint_results + missing_slots. 29 tests green (5 unit incl. backtracking-recovery + 4 feature). Generate/Paper screens wired to live API. |
 | M3 — Papers lifecycle + export | Done | Cross-paper repetition (exclude last-N papers, owner+subject) wired into `PaperGenerator`; `used_count` bumped on persist; `apiResource papers` (index/show/update/destroy) + `analytics` + `export?format=pdf\|docx` from one shared `PaperViewModel` (dompdf + PhpWord). CS301 bank expanded for two disjoint papers. 36 tests green (new: engine exclusion unit test + double-generate/export feature suite). Paper View / Export / History wired to live API. |
 | M3.1 — Imported past papers | Done | Real exams recorded as `papers` rows (`origin=imported`, nullable `blueprint_id`) via admin-only `POST /subjects/{subject}/past-papers` → `ImportedPaperService`. `PaperGenerator::lastNExclusion` window is now subject-wide (`owner_id = me OR origin = imported`), pure rolling. History/analytics filtered to `origin=generated`. 46 tests green (+10). See [`adr/0001-imported-past-papers.md`](adr/0001-imported-past-papers.md). |
-| M4 — PDF pipeline | Not started | |
+| M4 — PDF pipeline | Done | Python `POST /extract` (pdfplumber + per-page Tesseract OCR fallback + heuristic parser) in `python-service/app/`; `document_uploads` + `ProcessDocumentUpload` on Redis/Horizon; `POST/GET/DELETE /uploads`; review queue (`approve`/`reject` + bulk) gated so a candidate missing a unit or marks cannot be approved. `questions.unit_id`/`marks` now nullable. 89 Laravel tests (+43) and 51 pytest tests green. Upload + Review Queue screens wired to the live API. |
+| M4.1 — Syllabus import | Done | Python `services/syllabus.py` parses a syllabus into courses + units (`number`, `name`, `hours`, markdown `content`) and returns them as `courses[]` from `/extract`; staged in `document_uploads.meta.courses`; admin confirms at `/admin/syllabus/:uploadId`; transactional `POST /uploads/{id}/import` → `SyllabusImporter`. New `units.hours` + `units.content`; `subjects.syllabus` now holds the course as markdown (M5's corpus). Import is additive and idempotent — it never deletes a unit, because `questions.unit_id` cascades. 112 Laravel tests (+23) and 97 pytest (+30) green. See [`adr/0002-syllabus-import.md`](adr/0002-syllabus-import.md). |
 | M5 — AI bank expansion | Not started | |
 
 ---
@@ -461,7 +462,7 @@ nullable `blueprint_id`; no new tables. M2/M3 ER diagrams updated to match.
 
 ## M4 — PDF pipeline
 
-**Status:** Not started
+**Status:** Done
 
 **Goal:** Turn uploaded past-paper PDFs into reviewable question candidates via the async Python
 service, with Redis+Horizon online.
@@ -478,7 +479,9 @@ service, with Redis+Horizon online.
 - *Frontend wiring:* Admin → Upload, Extraction Review Queue.
 
 **Database after M4** — New table: `document_uploads`. (Framework `jobs`/`failed_jobs`/`job_batches`
-also present for the queue.)
+also present for the queue.) **Changed:** `questions.unit_id` and `questions.marks` are now
+**nullable** — the extractor yields only a unit *hint*, and papers often omit marks. Approval
+requires both, and the generator selects `approved` rows only, so it never sees a null.
 Source: [`diagrams/m4-schema.mmd`](diagrams/m4-schema.mmd)
 
 ```mermaid
@@ -499,7 +502,8 @@ erDiagram
     QUESTIONS {
         bigint id PK
         bigint subject_id FK
-        bigint unit_id FK
+        bigint unit_id FK "nullable until approved"
+        int marks "nullable until approved"
         enum source "extracted|ai|manual"
         enum status "pending|approved|rejected"
     }
@@ -551,17 +555,96 @@ sequenceDiagram
 ```
 
 **API endpoints added**
-- `POST /uploads`, `GET /uploads/{id}`
-- `GET /questions?status=pending`, `POST /questions/{id}/approve`, `POST /questions/{id}/reject` (+ bulk)
+- `POST /uploads`, `GET /uploads`, `GET /uploads/{id}`, `DELETE /uploads/{id}` (all admin)
+- `GET /questions?status=pending` (also `?upload={id}` to scope the queue to one document)
+- `POST /questions/{id}/approve`, `POST /questions/{id}/reject`
+- `POST /questions/bulk-approve`, `POST /questions/bulk-reject` — bulk approve is partial:
+  it returns `{approved: [...], skipped: [{id, reason}]}` so a queue of forty is not blocked by
+  the two the parser could not tag.
 
 **Displayable product:** Admin uploads a past-paper PDF → watches the job run in `/horizon` →
 candidates appear in the Review Queue → approves them → they immediately become eligible in the
 generator (re-run M2 generation to see them used).
 
-**Acceptance / verification**
-- Python pytest: `/extract` on a digital PDF and a scanned PDF (OCR path); parser unit tests.
-- Feature test: upload dispatches a job; approval flips status to `approved`.
-- End-to-end: upload → Horizon shows processed job → review → approve → usable in generation.
+**Acceptance / verification** — all green.
+- Python pytest (67): `/extract` on a digital PDF and a scanned PDF (OCR path, real Tesseract);
+  parser unit tests including the compound-marks and repeating-header forms found in real papers.
+- Laravel (89, +43): upload dispatches the job; approval flips status to `approved`; a candidate
+  missing a unit or marks is refused.
+- End-to-end: uploaded a scanned paper → Horizon processed `ProcessDocumentUpload` in 24s
+  (`ocr_pages=1`) → 7 candidates in the queue → approved → a blueprint whose profiles only
+  extracted questions could satisfy generated a full paper from them.
+
+**Known limitations** (see follow-ups)
+- Unit tagging depends on the paper printing `Unit N` headings **and on the subject already having
+  units** — import them from the syllabus first (M4.1). Papers that divide by `Section A`/`Group B`
+  instead yield unlinked candidates for a human to assign — deliberately, since a section is not a
+  syllabus unit.
+- One upload maps to one subject. A combined PDF (e.g. the TU B.Sc. CSIT model questions, whose
+  13 pages are 13 different subjects) imports every question under the subject chosen at upload.
+
+---
+
+## M4.1 — Syllabus import (subjects + units from a PDF)
+
+**Status:** Done — see [`adr/0002-syllabus-import.md`](adr/0002-syllabus-import.md)
+
+**Goal:** Turn an uploaded syllabus PDF into a subject and its units, reviewed by an admin before
+anything is written — and store the syllabus as markdown so M5 has a corpus to ground on.
+
+**Why:** M4 accepted a syllabus upload and then discarded everything it extracted. That left units
+to be typed in by hand, and the M4 review queue depends on units existing: `UnitResolver` maps a
+past paper's `Unit 3` hint onto a unit that is already there. A real TU past paper produced
+**12 of 12 unassigned** questions for want of units.
+
+**Scope / deliverables**
+- *Python:* `services/syllabus.py` — splits on `Course Title:`, reads `Course No:`, description, and
+  `Unit N: Name (H Hrs.)` headings. Renders each unit's body as **markdown**, rejoining the PDF's
+  mid-sentence line wraps and turning `N.N Name: …` sub-topics into bullets. A unit the syllabus
+  leaves unnamed (`Unit 1: (3 hrs)`) is named after its first sub-topic and flagged `name_guessed`.
+  Returned from `POST /extract` as `courses[]`.
+- *Backend:* `units.hours` + `units.content` (markdown); the proposal staged in
+  `document_uploads.meta.courses`; transactional `POST /uploads/{id}/import` → `SyllabusImporter`;
+  `subjects.syllabus` filled with the course as one markdown document.
+- *Frontend:* `/admin/syllabus/:uploadId` — course picker (multi-course PDFs), editable subject
+  fields, editable unit table with `+ will add` / `✓ exists` per row, blocked while any name is blank.
+
+**The rule that shapes the whole feature:** `questions.unit_id → units` is `ON DELETE CASCADE`, so
+deleting a unit deletes its questions. An import therefore **only adds the units that are missing**
+(matched on a normalized name) and never deletes, renames or reorders an existing one. That makes
+re-import idempotent and safe, so it is allowed rather than locked.
+
+**Database after M4.1** — No new tables. Changed: `units` gains `hours` (int, nullable) and
+`content` (text, nullable, markdown). `subjects.syllabus` (long-existing, unused) now holds the
+course document.
+
+**API endpoints added**
+- `POST /uploads/{id}/import` (admin) → `{subject_id, created_subject, units_created, units_skipped}`
+- `GET /uploads/{id}` now returns `courses[]` and `imported_subject_id` for syllabus uploads.
+
+**Displayable product:** Admin uploads a syllabus PDF → picks the course → checks the unit names and
+hours → imports → the subject and its units appear in the catalog, and a past paper uploaded against
+that subject now tags itself instead of landing in *Unassigned*.
+
+**Acceptance / verification** — all green.
+- pytest (97, +30): course/unit parsing, derived names for unnamed units, `4hrs` with no space,
+  multi-course documents, a document with units but no course header, markdown rendering
+  (rejoined paragraphs, labelled bullets, normalized quotes).
+- Laravel (112, +23): import creates subject + units with positions/hours/content; importing onto an
+  existing subject adds only missing units and **deletes none** (its questions survive); an existing
+  unit's content is not overwritten; duplicate or blank unit names → 422; re-import is idempotent;
+  teacher → 403; a `past_paper` upload → 422.
+- End-to-end on the real 23-page TU syllabus: 11 courses detected, `ocr_pages=0`. Imported CSC365 —
+  all four units named from their sub-topics (`Compiler Structure`, `Lexical Analysis`,
+  `Symbol Table Design`, `Intermediate Code Generator`), hours `3, 22, 4, 16`. Re-import →
+  `units_created: 0`. Imported CSC367, then uploaded a past paper with `Unit 1/2/3` headings against
+  it: **`questions_unlinked: 0`** — every hint resolved.
+
+**Follow-ups**
+- Re-import does not refresh an existing unit's `content`; units predating this change keep
+  `content = null` until a backfill command exists.
+- Semester, credit hours and full/pass marks are parsed away, not stored.
+- Lab work, textbook lists and course objectives are not carried into `subjects.syllabus`.
 
 ---
 

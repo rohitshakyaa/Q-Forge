@@ -13,7 +13,7 @@ class QuestionController extends Controller
 {
     /**
      * Paginated, filterable question bank.
-     * Filters: subject (code), unit (id), type, difficulty, status.
+     * Filters: subject (code), unit (id), type, difficulty, status, upload (id).
      */
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -22,6 +22,8 @@ class QuestionController extends Controller
             ->when($request->filled('subject'), function ($q) use ($request) {
                 $q->whereHas('subject', fn ($s) => $s->where('code', $request->input('subject')));
             })
+            // Scopes the review queue to the candidates a single upload produced.
+            ->when($request->filled('upload'), fn ($q) => $q->where('attributes->upload_id', (int) $request->input('upload')))
             ->when($request->filled('unit'), fn ($q) => $q->where('unit_id', $request->input('unit')))
             ->when($request->filled('type'), fn ($q) => $q->where('type', $request->input('type')))
             ->when($request->filled('difficulty'), fn ($q) => $q->where('difficulty', $request->input('difficulty')))

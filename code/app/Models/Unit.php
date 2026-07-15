@@ -17,12 +17,15 @@ class Unit extends Model
         'subject_id',
         'name',
         'position',
+        'hours',
+        'content',
     ];
 
     protected function casts(): array
     {
         return [
             'position' => 'integer',
+            'hours' => 'integer',
         ];
     }
 

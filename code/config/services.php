@@ -37,6 +37,13 @@ return [
 
     'python' => [
         'base_url' => env('PYTHON_SERVICE_URL', 'http://qforge_python:8000'),
+
+        // Where the `shared` disk is mounted *inside the Python container*. Paths
+        // sent to /extract are this root joined with document_uploads.stored_path.
+        'shared_root' => env('PYTHON_SHARED_ROOT', '/shared-storage/shared'),
+
+        // Extraction OCRs every scanned page; it is not a fast request.
+        'extract_timeout' => (int) env('PYTHON_EXTRACT_TIMEOUT', 600),
     ],
 
 ];

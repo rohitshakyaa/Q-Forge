@@ -1,0 +1,5 @@
+-r requirements.txt
+
+pytest
+# Authors the fixture PDFs in tests/conftest.py, so no binaries live in the repo.
+fpdf2

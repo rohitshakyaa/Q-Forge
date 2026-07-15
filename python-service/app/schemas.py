@@ -1,0 +1,79 @@
+from typing import Any, Generic, Literal, TypeVar
+
+from pydantic import BaseModel, Field
+
+DocumentType = Literal["syllabus", "past_paper"]
+QuestionType = Literal["short", "long", "mcq"]
+
+T = TypeVar("T")
+
+
+class Envelope(BaseModel, Generic[T]):
+    """The `{status, data, errors}` shape every endpoint returns (see CLAUDE.md)."""
+
+    status: Literal["success", "error"]
+    data: T | None = None
+    errors: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def ok(cls, data: T) -> "Envelope[T]":
+        return cls(status="success", data=data)
+
+    @classmethod
+    def fail(cls, *errors: str) -> "Envelope[T]":
+        return cls(status="error", data=None, errors=list(errors))
+
+
+class ExtractRequest(BaseModel):
+    # Absolute path inside the shared volume. Laravel builds it from
+    # config('services.python.shared_root') + document_uploads.stored_path.
+    path: str
+    type: DocumentType = "past_paper"
+
+
+class Candidate(BaseModel):
+    """One parsed question. Laravel decides whether and how to persist it."""
+
+    text: str
+    type: QuestionType
+    marks: int | None = None
+    # Free-text unit hint as printed on the paper ("Unit 3", "Group B"). Laravel
+    # resolves it against the subject's units; null means the parser saw none.
+    unit_hint: str | None = None
+    number: str | None = None
+    page: int
+    ocr: bool = False
+
+
+class SyllabusUnit(BaseModel):
+    """One unit of a course, as printed in the syllabus."""
+
+    number: int
+    name: str | None = None
+    hours: int | None = None
+    # The unit's own syllabus body, rendered as markdown. Laravel stores this on
+    # `units.content` — it is the per-unit grounding context for AI generation.
+    content: str | None = None
+    # True when `name` was inferred from the first sub-topic because the syllabus
+    # printed the heading without one ("Unit 1: (3 hrs)").
+    name_guessed: bool = False
+
+
+class Course(BaseModel):
+    """A course block. `code`/`name` are null when the PDF prints no course header."""
+
+    code: str | None = None
+    name: str | None = None
+    description: str | None = None
+    # The whole course as one markdown document, destined for `subjects.syllabus`.
+    markdown: str = ""
+    units: list[SyllabusUnit] = Field(default_factory=list)
+
+
+class ExtractData(BaseModel):
+    pages: int
+    ocr_pages: int
+    # A past_paper fills `candidates`; a syllabus fills `courses`. Never both.
+    candidates: list[Candidate] = Field(default_factory=list)
+    courses: list[Course] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)

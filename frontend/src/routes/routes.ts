@@ -39,6 +39,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/admin/AdminExtractionView.vue'),
       },
       {
+        path: 'syllabus/:uploadId',
+        name: 'admin-syllabus-import',
+        component: () => import('../views/admin/AdminSyllabusImportView.vue'),
+      },
+      {
         path: 'bank',
         name: 'admin-question-bank',
         component: () => import('../views/admin/AdminQuestionBankView.vue'),

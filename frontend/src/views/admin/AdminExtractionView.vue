@@ -1,181 +1,165 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   QFAIHint,
   QFBadge,
   QFButton,
-  QFCard,
   QFInput,
   QFPageHeader,
   QFSelect,
 } from '../../components/qf';
+import { useCatalogStore } from '../../stores/catalog';
+import {
+  type Candidate,
+  QUESTION_TYPES,
+  type ReviewStatus,
+  useExtractionStore,
+} from '../../stores/extraction';
 
 const route = useRoute();
+const catalog = useCatalogStore();
+const extraction = useExtractionStore();
 
-type Status = 'pending' | 'approved' | 'rejected';
+type Filter = 'all' | ReviewStatus;
 
-interface ExtractedQuestion {
-  id: number;
-  text: string;
-  units: string[];
-  marks: number;
-  type: string;
-  status: Status;
-  ai_conf: number;
-  editing?: boolean;
-  _snapshot?: Omit<ExtractedQuestion, '_snapshot' | 'editing'>;
-}
+const uploadId = route.query.upload ? Number(route.query.upload) : undefined;
+const selectedSubject = ref<string>((route.query.subject as string) ?? '');
+const filter = ref<Filter>('pending');
+const actionError = ref<string | null>(null);
+const skippedNotice = ref<string | null>(null);
 
-const AVAILABLE_UNITS = [
-  'Unit 1 – Sorting',
-  'Unit 2 – Hashing',
-  'Unit 3 – Graph Algorithms',
-  'Unit 4 – Trees',
-];
+/** Per-candidate edit buffers, keyed by id. Absent means "not editing". */
+const drafts = reactive<Record<number, { text: string; marks: string; type: string; unitId: string }>>({});
 
-const QUESTION_TYPES = ['Short Answer', 'Long Answer', 'MCQ', 'Programming'];
-
-const sourceFile = (route.query.file as string) || 'NetworkingSyllabus.pdf';
-const sourceSubject = (route.query.subject as string) || 'CS302';
-const sourceYear = (route.query.year as string) || '2022';
-
-const questions = ref<ExtractedQuestion[]>([
-  {
-    id: 1,
-    text: 'Explain the difference between BFS and DFS with time complexity analysis.',
-    units: ['Unit 3 – Graph Algorithms'],
-    marks: 10,
-    type: 'Long Answer',
-    status: 'pending',
-    ai_conf: 0.97,
-  },
-  {
-    id: 2,
-    text: 'What is a hash collision? Name two resolution techniques.',
-    units: ['Unit 2 – Hashing'],
-    marks: 5,
-    type: 'Short Answer',
-    status: 'approved',
-    ai_conf: 0.99,
-  },
-  {
-    id: 3,
-    text: "Implement Dijkstra's algorithm and analyse its running time using a priority queue.",
-    units: ['Unit 3 – Graph Algorithms', 'Unit 1 – Sorting'],
-    marks: 15,
-    type: 'Programming',
-    status: 'pending',
-    ai_conf: 0.88,
-  },
-  {
-    id: 4,
-    text: 'Define a B-tree. What are its properties?',
-    units: ['Unit 4 – Trees'],
-    marks: 5,
-    type: 'Short Answer',
-    status: 'rejected',
-    ai_conf: 0.91,
-  },
-  {
-    id: 5,
-    text: 'Compare quicksort and mergesort in terms of average and worst-case complexity.',
-    units: ['Unit 1 – Sorting'],
-    marks: 8,
-    type: 'Long Answer',
-    status: 'pending',
-    ai_conf: 0.95,
-  },
-  {
-    id: 6,
-    text: 'Compare AVL trees and B-trees — when is each preferred for indexing?',
-    units: ['Unit 4 – Trees', 'Unit 2 – Hashing'],
-    marks: 10,
-    type: 'Long Answer',
-    status: 'pending',
-    ai_conf: 0.84,
-  },
+const subjectOptions = computed(() => catalog.subjects.map((s) => ({ value: s.code, label: s.code })));
+const unitOptions = computed(() => [
+  { value: '', label: '— Unassigned —' },
+  ...extraction.units.map((u) => ({ value: String(u.id), label: u.name })),
 ]);
 
-const filter = ref<'all' | Status>('all');
+const candidates = computed(() => extraction.candidates);
+const visible = computed(() =>
+  filter.value === 'all' ? candidates.value : candidates.value.filter((c) => c.status === filter.value),
+);
+const pending = computed(() => candidates.value.filter((c) => c.status === 'pending'));
 
-const filtered = computed(() =>
-  filter.value === 'all'
-    ? questions.value
-    : questions.value.filter((q) => q.status === filter.value),
+/** Candidates grouped under the unit they are tagged to, in syllabus order. */
+const byUnit = computed(() =>
+  extraction.units.map((unit) => ({
+    unit,
+    items: visible.value.filter((c) => c.unitId === unit.id),
+  })),
 );
 
-const pending = computed(() => questions.value.filter((q) => q.status === 'pending').length);
+// The parser leaves these untagged; they cannot be approved until someone assigns a unit.
+const unassigned = computed(() => visible.value.filter((c) => c.unitId === null));
 
-const questionsByUnit = computed<Record<string, ExtractedQuestion[]>>(() => {
-  const map: Record<string, ExtractedQuestion[]> = {};
-  for (const unit of AVAILABLE_UNITS) map[unit] = [];
-  for (const q of filtered.value) {
-    for (const u of q.units) {
-      if (!map[u]) map[u] = [];
-      map[u].push(q);
-    }
-  }
-  return map;
+const countsLabel = computed(() => {
+  const source = uploadId ? `Upload #${uploadId}` : selectedSubject.value || 'All subjects';
+
+  return `${source} · ${candidates.value.length} extracted · ${pending.value.length} pending`;
 });
 
-const unlinkedQuestions = computed(() => filtered.value.filter((q) => q.units.length === 0));
+const load = async () => {
+  await extraction.fetchCandidates({
+    subject: selectedSubject.value || undefined,
+    upload: uploadId,
+    status: filter.value,
+  });
 
-const act = (id: number, status: Status) => {
-  questions.value = questions.value.map((x) => (x.id === id ? { ...x, status } : x));
+  // With no subject filter the queue can span subjects; unit assignment then needs
+  // whichever subject the candidates actually came from.
+  const code = selectedSubject.value || candidates.value[0]?.subjectCode;
+  if (code) await extraction.fetchUnits(code);
 };
 
-const approveAllPending = () => {
-  questions.value = questions.value.map((q) => (q.status === 'pending' ? { ...q, status: 'approved' } : q));
-};
+const isEditing = (id: number) => id in drafts;
 
-const rejectAllPending = () => {
-  questions.value = questions.value.map((q) => (q.status === 'pending' ? { ...q, status: 'rejected' } : q));
-};
-
-const beginEdit = (id: number) => {
-  const q = questions.value.find((x) => x.id === id);
-  if (!q) return;
-  const { editing: _e, _snapshot: _s, ...rest } = q;
-  q._snapshot = { ...rest, units: [...rest.units] };
-  q.editing = true;
+const beginEdit = (c: Candidate) => {
+  drafts[c.id] = {
+    text: c.text,
+    marks: c.marks === null ? '' : String(c.marks),
+    type: c.type,
+    unitId: c.unitId === null ? '' : String(c.unitId),
+  };
 };
 
 const cancelEdit = (id: number) => {
-  const idx = questions.value.findIndex((x) => x.id === id);
-  if (idx < 0) return;
-  const q = questions.value[idx];
-  if (q._snapshot) {
-    questions.value[idx] = { ...q._snapshot };
-  } else {
-    q.editing = false;
+  delete drafts[id];
+};
+
+const draftPatch = (id: number) => {
+  const draft = drafts[id];
+
+  return {
+    text: draft.text,
+    type: draft.type,
+    marks: draft.marks === '' ? null : Number(draft.marks),
+    unitId: draft.unitId === '' ? null : Number(draft.unitId),
+  };
+};
+
+/** Surfaces the backend's validation message — e.g. "a unit is required". */
+const withErrorHandling = async (fn: () => Promise<void>) => {
+  actionError.value = null;
+  try {
+    await fn();
+  } catch (e: unknown) {
+    const data = (e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } })
+      .response?.data;
+    const first = data?.errors ? Object.values(data.errors)[0]?.[0] : undefined;
+    actionError.value = first ?? data?.message ?? 'Something went wrong.';
   }
 };
 
-const saveEdit = (id: number) => {
-  const q = questions.value.find((x) => x.id === id);
-  if (!q) return;
-  q.editing = false;
-  delete q._snapshot;
-};
+const saveEdit = (id: number) =>
+  withErrorHandling(async () => {
+    await extraction.save(id, draftPatch(id));
+    cancelEdit(id);
+  });
 
-const toggleUnit = (q: ExtractedQuestion, unit: string) => {
-  if (q.units.includes(unit)) {
-    q.units = q.units.filter((u) => u !== unit);
-  } else {
-    q.units = [...q.units, unit];
-  }
-};
+const approve = (c: Candidate) =>
+  withErrorHandling(async () => {
+    // An open editor's corrections are applied as part of the approval.
+    await extraction.approve(c.id, isEditing(c.id) ? draftPatch(c.id) : {});
+    cancelEdit(c.id);
+  });
 
-const statusVariant = (s: Status): 'success' | 'danger' | 'warn' =>
+const reject = (c: Candidate) =>
+  withErrorHandling(async () => {
+    await extraction.reject(c.id);
+    cancelEdit(c.id);
+  });
+
+const approveAllPending = () =>
+  withErrorHandling(async () => {
+    skippedNotice.value = null;
+    const skipped = await extraction.bulkApprove(pending.value.map((c) => c.id));
+    if (skipped.length > 0) {
+      skippedNotice.value = `${skipped.length} question(s) were skipped — they still need a unit or marks.`;
+    }
+  });
+
+const rejectAllPending = () =>
+  withErrorHandling(() => extraction.bulkReject(pending.value.map((c) => c.id)));
+
+const statusVariant = (s: ReviewStatus): 'success' | 'danger' | 'warn' =>
   s === 'approved' ? 'success' : s === 'rejected' ? 'danger' : 'warn';
+
+onMounted(async () => {
+  if (catalog.subjects.length === 0) await catalog.fetchSubjects();
+  await load();
+});
+
+watch([filter, selectedSubject], load);
 </script>
 
 <template>
   <div class="qf-content qf-anim-in">
     <QFPageHeader
       title="Question Extraction Review"
-      :subtitle="`${sourceFile} · ${sourceSubject} · Year ${sourceYear} · ${questions.length} questions extracted`"
+      :subtitle="countsLabel"
       :breadcrumbs="[
         { label: 'Dashboard', to: '/admin' },
         { label: 'Past Papers', to: '/admin/upload' },
@@ -183,18 +167,29 @@ const statusVariant = (s: Status): 'success' | 'danger' | 'warn' =>
       ]"
     >
       <template #actions>
-        <QFButton variant="secondary" @click="rejectAllPending">Reject All</QFButton>
-        <QFButton variant="primary" @click="approveAllPending">Approve All ({{ pending }})</QFButton>
+        <QFButton variant="secondary" :disabled="pending.length === 0" @click="rejectAllPending">
+          Reject All
+        </QFButton>
+        <QFButton variant="primary" :disabled="pending.length === 0" @click="approveAllPending">
+          Approve All ({{ pending.length }})
+        </QFButton>
       </template>
     </QFPageHeader>
 
     <QFAIHint style="margin-bottom: 20px">
-      <strong style="color: var(--ai)">AI extracted {{ questions.length }} questions</strong>
-      and grouped them by unit. Questions tagged to multiple units appear in each unit with a
-      <span style="color: var(--ai)">🔗 linked</span> indicator — editing one updates all instances.
+      Extracted questions land here as <strong>pending</strong> — none of them reach the generator
+      until approved. A question with no unit or no marks cannot be approved: the parser could not
+      read them off the paper, so assign them below.
     </QFAIHint>
 
-    <div style="margin-bottom: 20px">
+    <div v-if="actionError" style="margin-bottom: 14px; font-size: 13px; color: var(--danger)">
+      {{ actionError }}
+    </div>
+    <div v-if="skippedNotice" style="margin-bottom: 14px; font-size: 13px; color: var(--warn)">
+      {{ skippedNotice }}
+    </div>
+
+    <div style="display: flex; gap: 16px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap">
       <div class="qf-tabs" style="display: inline-flex">
         <div
           v-for="f in (['all', 'pending', 'approved', 'rejected'] as const)"
@@ -204,38 +199,42 @@ const statusVariant = (s: Status): 'success' | 'danger' | 'warn' =>
           @click="filter = f"
         >
           {{ f }}
-          <template v-if="f === 'all'">({{ questions.length }})</template>
-          <template v-else-if="f === 'pending'">({{ pending }})</template>
+          <template v-if="f === 'pending'">({{ pending.length }})</template>
         </div>
+      </div>
+      <div v-if="!uploadId" style="min-width: 200px">
+        <QFSelect
+          v-model="selectedSubject"
+          label="Subject"
+          :options="[{ value: '', label: 'All subjects' }, ...subjectOptions]"
+        />
       </div>
     </div>
 
-    <div style="display: flex; flex-direction: column; gap: 20px">
-      <section v-for="unit in AVAILABLE_UNITS" :key="unit">
-        <div
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            padding: 0 4px;
-          "
-        >
-          <div style="display: flex; align-items: center; gap: 10px">
-            <span
-              style="
-                font-family: var(--font-head);
-                font-weight: 600;
-                font-size: 14px;
-                color: var(--text);
-              "
-            >{{ unit }}</span>
-            <QFBadge variant="neutral">{{ questionsByUnit[unit]?.length ?? 0 }} questions</QFBadge>
-          </div>
+    <div v-if="extraction.loading" style="padding: 24px; color: var(--text3); font-size: 13px">
+      Loading candidates…
+    </div>
+
+    <div v-else-if="candidates.length === 0" style="padding: 24px; color: var(--text3); font-size: 13px">
+      No extracted questions here yet. Upload a past paper to populate the queue.
+    </div>
+
+    <div v-else style="display: flex; flex-direction: column; gap: 20px">
+      <section v-for="group in byUnit" :key="group.unit.id">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 0 4px">
+          <span
+            style="
+              font-family: var(--font-head);
+              font-weight: 600;
+              font-size: 14px;
+              color: var(--text);
+            "
+          >{{ group.unit.name }}</span>
+          <QFBadge variant="neutral">{{ group.items.length }} questions</QFBadge>
         </div>
 
         <div
-          v-if="!questionsByUnit[unit] || questionsByUnit[unit].length === 0"
+          v-if="group.items.length === 0"
           style="
             padding: 16px;
             text-align: center;
@@ -251,57 +250,41 @@ const statusVariant = (s: Status): 'success' | 'danger' | 'warn' =>
 
         <div v-else style="display: flex; flex-direction: column; gap: 10px">
           <div
-            v-for="q in questionsByUnit[unit]"
-            :key="`${unit}-${q.id}`"
+            v-for="c in group.items"
+            :key="c.id"
             :style="{
               background: 'var(--bg1)',
-              border: `1px solid ${q.editing ? 'var(--cyan)' : 'var(--border)'}`,
+              border: `1px solid ${isEditing(c.id) ? 'var(--cyan)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-lg)',
               padding: '14px 16px',
-              transition: 'all 0.15s',
             }"
           >
             <!-- view mode -->
-            <div v-if="!q.editing" style="display: flex; align-items: flex-start; gap: 12px">
+            <div v-if="!isEditing(c.id)" style="display: flex; align-items: flex-start; gap: 12px">
               <div style="flex: 1; min-width: 0">
                 <p style="font-size: 13.5px; line-height: 1.6; margin-bottom: 8px; color: var(--text)">
-                  {{ q.text }}
+                  {{ c.text }}
                 </p>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
-                  <QFBadge
-                    v-for="u in q.units"
-                    :key="u"
-                    :variant="u === unit ? 'cyan' : 'neutral'"
-                  >{{ u === unit ? u : `↗ ${u}` }}</QFBadge>
-                  <QFBadge v-if="q.units.length > 1" variant="ai" dot>
-                    🔗 linked · {{ q.units.length }} units
-                  </QFBadge>
-                  <QFBadge variant="neutral">{{ q.marks }} marks</QFBadge>
-                  <QFBadge variant="neutral">{{ q.type }}</QFBadge>
-                  <span
-                    :style="{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '11px',
-                      color: q.ai_conf > 0.9 ? 'var(--success)' : 'var(--warn)',
-                      background: q.ai_conf > 0.9 ? 'var(--success-dim)' : 'var(--warn-dim)',
-                      padding: '2px 7px',
-                      borderRadius: '10px',
-                    }"
-                  >AI {{ Math.round(q.ai_conf * 100) }}%</span>
+                  <QFBadge variant="cyan">{{ group.unit.name }}</QFBadge>
+                  <QFBadge v-if="c.marks !== null" variant="neutral">{{ c.marks }} marks</QFBadge>
+                  <QFBadge v-else variant="warn">marks not detected</QFBadge>
+                  <QFBadge variant="neutral">{{ c.type }}</QFBadge>
+                  <QFBadge v-if="c.ocr" variant="ai" dot>OCR</QFBadge>
+                  <span v-if="c.page" style="font-size: 11px; color: var(--text3)">p.{{ c.page }}</span>
+                  <span v-if="c.unitHint" style="font-size: 11px; color: var(--text3)">
+                    hint: {{ c.unitHint }}
+                  </span>
                 </div>
               </div>
               <div style="display: flex; flex-direction: column; gap: 6px; flex-shrink: 0">
-                <QFButton variant="secondary" size="sm" @click="beginEdit(q.id)">Edit</QFButton>
-                <template v-if="q.status === 'pending'">
-                  <QFButton variant="primary" size="sm" @click="act(q.id, 'approved')">
-                    ✓ Approve
-                  </QFButton>
-                  <QFButton variant="danger" size="sm" @click="act(q.id, 'rejected')">
-                    ✕ Reject
-                  </QFButton>
+                <QFButton variant="secondary" size="sm" @click="beginEdit(c)">Edit</QFButton>
+                <template v-if="c.status === 'pending'">
+                  <QFButton variant="primary" size="sm" @click="approve(c)">✓ Approve</QFButton>
+                  <QFButton variant="danger" size="sm" @click="reject(c)">✕ Reject</QFButton>
                 </template>
-                <QFBadge v-else :variant="statusVariant(q.status)" dot>
-                  {{ q.status === 'approved' ? 'Approved' : 'Rejected' }}
+                <QFBadge v-else :variant="statusVariant(c.status)" dot>
+                  {{ c.status === 'approved' ? 'Approved' : 'Rejected' }}
                 </QFBadge>
               </div>
             </div>
@@ -309,78 +292,35 @@ const statusVariant = (s: Status): 'success' | 'danger' | 'warn' =>
             <!-- edit mode -->
             <div v-else style="display: flex; flex-direction: column; gap: 14px">
               <QFInput
-                :model-value="q.text"
+                :model-value="drafts[c.id].text"
                 label="Question text"
                 type="textarea"
                 :rows="3"
-                @update:model-value="(v) => (q.text = String(v))"
+                @update:model-value="(v) => (drafts[c.id].text = String(v))"
               />
-
-              <div>
-                <label
-                  class="qf-label"
-                  style="display: block; margin-bottom: 6px"
-                >Units ({{ q.units.length }} selected)</label>
-                <div style="display: flex; flex-wrap: wrap; gap: 6px">
-                  <button
-                    v-for="u in AVAILABLE_UNITS"
-                    :key="u"
-                    type="button"
-                    :style="{
-                      padding: '5px 10px',
-                      borderRadius: '999px',
-                      fontSize: '12px',
-                      fontFamily: 'var(--font-ui)',
-                      cursor: 'pointer',
-                      border: `1px solid ${q.units.includes(u) ? 'var(--cyan)' : 'var(--border2)'}`,
-                      background: q.units.includes(u) ? 'var(--cyan-dim)' : 'var(--bg2)',
-                      color: q.units.includes(u) ? 'var(--cyan)' : 'var(--text2)',
-                      transition: 'all 0.12s',
-                    }"
-                    @click="toggleUnit(q, u)"
-                  >
-                    {{ q.units.includes(u) ? '✓ ' : '+ ' }}{{ u }}
-                  </button>
-                </div>
-                <div
-                  v-if="q.units.length > 1"
-                  style="font-size: 11.5px; color: var(--ai); margin-top: 6px"
-                >
-                  🔗 This question will appear in all {{ q.units.length }} selected units.
-                </div>
-                <div
-                  v-else-if="q.units.length === 0"
-                  style="font-size: 11.5px; color: var(--warn); margin-top: 6px"
-                >
-                  ⚠ No unit selected — question will not appear in any unit section.
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <QFSelect v-model="drafts[c.id].unitId" label="Unit" :options="unitOptions" />
                 <QFInput
-                  :model-value="q.marks"
+                  :model-value="drafts[c.id].marks"
                   label="Marks"
                   type="number"
-                  @update:model-value="(v) => (q.marks = Number(v) || 0)"
+                  @update:model-value="(v) => (drafts[c.id].marks = String(v))"
                 />
-                <QFSelect
-                  :model-value="q.type"
-                  label="Type"
-                  :options="QUESTION_TYPES"
-                  @update:model-value="(v) => (q.type = v)"
-                />
+                <QFSelect v-model="drafts[c.id].type" label="Type" :options="QUESTION_TYPES" />
               </div>
-
               <div style="display: flex; gap: 8px; justify-content: flex-end">
-                <QFButton variant="secondary" size="sm" @click="cancelEdit(q.id)">Cancel</QFButton>
-                <QFButton variant="primary" size="sm" @click="saveEdit(q.id)">Save changes</QFButton>
+                <QFButton variant="secondary" size="sm" @click="cancelEdit(c.id)">Cancel</QFButton>
+                <QFButton variant="secondary" size="sm" @click="saveEdit(c.id)">Save changes</QFButton>
+                <QFButton v-if="c.status === 'pending'" variant="primary" size="sm" @click="approve(c)">
+                  Save &amp; Approve
+                </QFButton>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section v-if="unlinkedQuestions.length > 0">
+      <section v-if="unassigned.length > 0">
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 0 4px">
           <span
             style="
@@ -390,17 +330,75 @@ const statusVariant = (s: Status): 'success' | 'danger' | 'warn' =>
               color: var(--warn);
             "
           >⚠ Unassigned</span>
-          <QFBadge variant="warn">{{ unlinkedQuestions.length }} questions</QFBadge>
+          <QFBadge variant="warn">{{ unassigned.length }} questions</QFBadge>
           <span style="font-size: 12px; color: var(--text3)">
-            AI couldn't confidently tag these to a unit — assign one via Edit.
+            The parser found no unit heading for these — assign one via Edit before approving.
           </span>
         </div>
-        <QFCard>
-          <div class="qf-card-body" style="font-size: 12.5px; color: var(--text3)">
-            {{ unlinkedQuestions.length }} question(s) have no unit assigned. Use the filter tabs
-            above and click Edit on any question to add units.
+
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <div
+            v-for="c in unassigned"
+            :key="c.id"
+            :style="{
+              background: 'var(--bg1)',
+              border: `1px solid ${isEditing(c.id) ? 'var(--cyan)' : 'var(--warn)'}`,
+              borderRadius: 'var(--radius-lg)',
+              padding: '14px 16px',
+            }"
+          >
+            <div v-if="!isEditing(c.id)" style="display: flex; align-items: flex-start; gap: 12px">
+              <div style="flex: 1; min-width: 0">
+                <p style="font-size: 13.5px; line-height: 1.6; margin-bottom: 8px; color: var(--text)">
+                  {{ c.text }}
+                </p>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+                  <QFBadge variant="warn">no unit</QFBadge>
+                  <QFBadge v-if="c.marks !== null" variant="neutral">{{ c.marks }} marks</QFBadge>
+                  <QFBadge v-else variant="warn">marks not detected</QFBadge>
+                  <QFBadge variant="neutral">{{ c.type }}</QFBadge>
+                  <QFBadge v-if="c.ocr" variant="ai" dot>OCR</QFBadge>
+                  <span v-if="c.unitHint" style="font-size: 11px; color: var(--text3)">
+                    hint: {{ c.unitHint }}
+                  </span>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px; flex-shrink: 0">
+                <QFButton variant="primary" size="sm" @click="beginEdit(c)">Assign unit</QFButton>
+                <QFButton v-if="c.status === 'pending'" variant="danger" size="sm" @click="reject(c)">
+                  ✕ Reject
+                </QFButton>
+              </div>
+            </div>
+
+            <div v-else style="display: flex; flex-direction: column; gap: 14px">
+              <QFInput
+                :model-value="drafts[c.id].text"
+                label="Question text"
+                type="textarea"
+                :rows="3"
+                @update:model-value="(v) => (drafts[c.id].text = String(v))"
+              />
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <QFSelect v-model="drafts[c.id].unitId" label="Unit" :options="unitOptions" />
+                <QFInput
+                  :model-value="drafts[c.id].marks"
+                  label="Marks"
+                  type="number"
+                  @update:model-value="(v) => (drafts[c.id].marks = String(v))"
+                />
+                <QFSelect v-model="drafts[c.id].type" label="Type" :options="QUESTION_TYPES" />
+              </div>
+              <div style="display: flex; gap: 8px; justify-content: flex-end">
+                <QFButton variant="secondary" size="sm" @click="cancelEdit(c.id)">Cancel</QFButton>
+                <QFButton variant="secondary" size="sm" @click="saveEdit(c.id)">Save changes</QFButton>
+                <QFButton v-if="c.status === 'pending'" variant="primary" size="sm" @click="approve(c)">
+                  Save &amp; Approve
+                </QFButton>
+              </div>
+            </div>
           </div>
-        </QFCard>
+        </div>
       </section>
     </div>
   </div>

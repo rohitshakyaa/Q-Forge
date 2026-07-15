@@ -11,7 +11,12 @@ export const applyRouteGuards = (router: Router) => {
   router.beforeEach(async (to) => {
     const authStore = useAuthStore();
 
-    if (authStore.token && !authStore.user) {
+    // Validate on every navigation, not only when the user is missing. The user is
+    // persisted alongside the token, so a token revoked server-side — by a logout
+    // in another tab, or by a login elsewhere, which deletes the user's tokens —
+    // would otherwise satisfy the checks below and 401 on the first API call.
+    // hydrateFromToken() clears the session on failure, so we fall through to /login.
+    if (authStore.token) {
       await authStore.hydrateFromToken();
     }
 

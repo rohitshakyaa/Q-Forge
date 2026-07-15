@@ -39,8 +39,8 @@ workflow; Python only processes documents and generates text; the frontend talks
 All tables in MySQL via Laravel migrations. Key entities:
 
 - **subjects** — `id`, `code` (unique, route key), `name`, `description`, `syllabus` (longtext/markdown), timestamps.
-- **units** — `id`, `subject_id` (FK), `name`, `position`, timestamps. (A subject has many units.)
-- **questions** — `id`, `subject_id` (FK), `unit_id` (FK), `type` (string: `short`/`long`/`mcq`), `marks` (int), `difficulty` (nullable enum easy/medium/hard), `text` (longtext), `source` (enum `extracted`/`ai`/`manual`), `status` (enum `pending`/`approved`/`rejected`), `attributes` (JSON, nullable), `used_count` (int, denormalized for display), timestamps. Index on `(subject_id, unit_id, type, marks, status)` for fast candidate filtering.
+- **units** — `id`, `subject_id` (FK), `name`, `position`, `hours` (int, nullable), `content` (text, nullable), timestamps. (A subject has many units.) *`hours` and `content` are filled by the syllabus import (M4.1). `content` is the unit's syllabus body as markdown — the per-unit grounding context for AI generation, reachable by primary key because a shortfall names a unit.*
+- **questions** — `id`, `subject_id` (FK), `unit_id` (FK, nullable), `type` (string: `short`/`long`/`mcq`), `marks` (int, nullable), `difficulty` (nullable enum easy/medium/hard), `text` (longtext), `source` (enum `extracted`/`ai`/`manual`), `status` (enum `pending`/`approved`/`rejected`), `attributes` (JSON, nullable), `used_count` (int, denormalized for display), timestamps. Index on `(subject_id, unit_id, type, marks, status)` for fast candidate filtering. *`unit_id` and `marks` became nullable in M4: the extractor yields only a unit **hint**, and many past papers never print their marks. Approving a question requires both, and the generator selects `approved` rows only, so it never sees a null.*
 - **blueprints** — `id`, `owner_id` (FK users), `subject_id` (FK), `name`, `total_marks`, `duration`, `ai_assist` (bool), `definition` (JSON), `last_used_at` (nullable), timestamps.
 - **papers** — `id`, `owner_id` (FK), `blueprint_id` (FK), `subject_id` (FK), `name`, `total_marks`, `duration`, `status` (enum `draft`/`saved`/`exported`), `export_count` (int), `generated_at`, timestamps.
 - **paper_questions** (pivot/snapshot) — `id`, `paper_id` (FK), `question_id` (FK), `section_label`, `display_no`, `marks`, `unit_id`, `is_ai` (bool). This is the **source of truth for repetition control**: "used in last N papers" is derived by joining the most recent N `papers` for a subject to their `paper_questions`.
@@ -98,11 +98,12 @@ A self-contained, framework-light service so it is unit-testable in isolation:
 ## Python Service (`python-service/app/`)
 
 Structure: `main.py` (routes), `config.py` (`pydantic-settings`), `services/pdf.py`,
-`services/parser.py`, `services/ocr.py`, `services/llm/` (provider abstraction), `schemas.py`.
+`services/parser.py`, `services/ocr.py`, `services/syllabus.py`, `services/llm/` (provider
+abstraction), `schemas.py`.
 
 Endpoints (all return `{status, data, errors}` per CLAUDE.md):
 - `GET /health` (exists)
-- `POST /extract` — input: file path on the shared volume (`/shared-storage`, already mounted) + type. Runs pdfplumber/pypdf; per-page OCR fallback via pytesseract; heuristic parser splits into candidate questions with detected `marks`/`type`/`unit?`. Returns structured candidates. **No DB access** — Laravel persists them.
+- `POST /extract` — input: file path on the shared volume (`/shared-storage`, already mounted) + type. Runs pdfplumber/pypdf; per-page OCR fallback via pytesseract. A `past_paper` returns `candidates[]` — the heuristic parser's question blocks with detected `marks`/`type`/`unit?`. A `syllabus` returns `courses[]` — course code/name/description plus units (`number`, `name`, `hours`, markdown `content`), each course rendered as one markdown document. **No DB access** — Laravel persists them.
 - `POST /generate-questions` — input: subject/unit context, target type+marks, count, optional syllabus/past-question snippets. Calls `LLMProvider` (Ollama) → returns structured candidate questions for Laravel to validate + store.
 
 `LLMProvider` interface with `OllamaProvider` (default) + a stub provider, selected by env, so the

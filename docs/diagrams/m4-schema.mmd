@@ -2,6 +2,9 @@
 %% NEW in M4: document_uploads (tracks async extraction).
 %% Framework infra (not shown): jobs / failed_jobs / job_batches for Redis+Horizon queue.
 %% Extracted questions land as QUESTIONS rows: source=extracted, status=pending.
+%% CHANGED in M4: questions.unit_id and questions.marks became nullable — the parser
+%% only ever produces a unit *hint*, and many past papers do not print their marks.
+%% Approval requires both, so the generator (approved-only) never sees a null.
 erDiagram
     USERS ||--o{ BLUEPRINTS : owns
     USERS ||--o{ PAPERS : owns
@@ -32,7 +35,8 @@ erDiagram
     QUESTIONS {
         bigint id PK
         bigint subject_id FK
-        bigint unit_id FK
+        bigint unit_id FK "nullable until approved"
+        int marks "nullable until approved"
         enum source "extracted|ai|manual"
         enum status "pending|approved|rejected"
     }

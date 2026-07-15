@@ -9,6 +9,8 @@ use App\Http\Controllers\Api\QuestionController;
 use App\Http\Controllers\Api\BlueprintController;
 use App\Http\Controllers\Api\PaperController;
 use App\Http\Controllers\Api\PastPaperController;
+use App\Http\Controllers\Api\DocumentUploadController;
+use App\Http\Controllers\Api\QuestionReviewController;
 use App\Services\PythonService;
 
 Route::get('/user', function (Request $request) {
@@ -72,7 +74,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:admin')->group(function () {
         Route::apiResource('subjects', SubjectController::class)->except(['index', 'show']);
         Route::apiResource('subjects.units', UnitController::class)->shallow()->except(['index']);
+
+        // M4 — extraction review queue. Static segments before the {question}
+        // wildcard so they aren't swallowed by it.
+        Route::post('questions/bulk-approve', [QuestionReviewController::class, 'bulkApprove']);
+        Route::post('questions/bulk-reject', [QuestionReviewController::class, 'bulkReject']);
+        Route::post('questions/{question}/approve', [QuestionReviewController::class, 'approve']);
+        Route::post('questions/{question}/reject', [QuestionReviewController::class, 'reject']);
         Route::apiResource('questions', QuestionController::class);
+
+        // M4 — past-paper/syllabus PDF upload → queued extraction → review queue.
+        // Static segment before the apiResource so it isn't read as {documentUpload}.
+        Route::post('uploads/{documentUpload}/import', [DocumentUploadController::class, 'import']);
+        Route::apiResource('uploads', DocumentUploadController::class)
+            ->parameters(['uploads' => 'documentUpload'])
+            ->only(['index', 'store', 'show', 'destroy']);
+
         // M3.1 — record a real past exam as an imported paper (repetition source).
         Route::post('subjects/{subject}/past-papers', [PastPaperController::class, 'store']);
     });
