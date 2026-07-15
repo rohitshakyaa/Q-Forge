@@ -56,15 +56,13 @@ const diffColor: Record<string, string> = {
         { label: 'Dashboard', to: '/admin' },
         { label: 'Question Bank' },
       ]"
-    >
-      <template #actions>
-        <QFButton variant="ai">
-          <template #icon><span>✦</span></template>
-          AI Suggest
-        </QFButton>
-        <QFButton variant="primary">+ Add Question</QFButton>
-      </template>
-    </QFPageHeader>
+    />
+
+    <p class="text-text3 text-[13px] mb-5 -mt-2">
+      Questions are added per subject on the
+      <RouterLink to="/admin/subjects" class="text-cyan">Subjects &amp; Units</RouterLink> screen,
+      or imported from the review queue.
+    </p>
 
     <div class="flex flex-wrap gap-3 mb-5 items-end">
       <div class="qf-field flex-1 min-w-[220px] sm:flex-none sm:w-72 m-0">
@@ -99,7 +97,6 @@ const diffColor: Record<string, string> = {
             <th>Marks</th>
             <th>Difficulty</th>
             <th>Used</th>
-            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -156,9 +153,6 @@ const diffColor: Record<string, string> = {
                 </div>
                 <span style="font-size: 12px; color: var(--text3)">{{ q.used ?? 0 }}×</span>
               </div>
-            </td>
-            <td>
-              <QFButton variant="ghost" size="sm">Edit</QFButton>
             </td>
           </tr>
         </tbody>

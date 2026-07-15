@@ -6,6 +6,18 @@
  * Declaring vars here makes utilities like `bg-bg1`, `text-cyan`, `border-border`,
  * `font-head`, `rounded-lg`, etc. automatically available.
  * ----------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------
+ * Semantic, theme-aware design tokens.
+ *
+ * `@theme` declares every token so Tailwind generates the `bg-bg1`, `text-cyan`,
+ * `border-border` … utilities. The values here are the DARK defaults. The utilities
+ * reference the CSS variables (not inlined literals), so overriding a variable under
+ * `:root[data-theme="light"]` re-themes the whole app at runtime — no rebuild.
+ *
+ * Brand identity is preserved (cyan primary, indigo secondary). In light mode the
+ * cyan/indigo/semantic hues are darkened so they clear WCAG AA as text on light
+ * surfaces, while `--color-on-primary` flips the ink used on filled accent buttons.
+ * ----------------------------------------------------------------------- */
 @theme {
   --color-bg: #070a10;
   --color-bg1: #0d1119;
@@ -14,23 +26,24 @@
   --color-border: #1e2840;
   --color-border2: #253049;
   --color-text: #dde4ef;
-  --color-text2: #8896aa;
-  --color-text3: #4e5e74;
+  --color-text2: #9aa7bc;
+  --color-text3: #74839a;
+  --color-on-primary: #070a10;
 
-  --color-cyan: oklch(0.75 0.19 196);
-  --color-cyan-dim: oklch(0.75 0.19 196 / 0.15);
-  --color-cyan-glow: oklch(0.75 0.19 196 / 0.35);
-  --color-indigo: oklch(0.62 0.22 265);
-  --color-indigo-dim: oklch(0.62 0.22 265 / 0.15);
+  --color-cyan: oklch(0.78 0.16 196);
+  --color-cyan-dim: oklch(0.78 0.16 196 / 0.16);
+  --color-cyan-glow: oklch(0.78 0.16 196 / 0.35);
+  --color-indigo: oklch(0.64 0.19 266);
+  --color-indigo-dim: oklch(0.64 0.19 266 / 0.16);
   --color-violet: oklch(0.65 0.2 290);
-  --color-success: oklch(0.72 0.16 152);
-  --color-success-dim: oklch(0.72 0.16 152 / 0.12);
-  --color-warn: oklch(0.78 0.15 70);
-  --color-warn-dim: oklch(0.78 0.15 70 / 0.12);
-  --color-danger: oklch(0.65 0.2 25);
-  --color-danger-dim: oklch(0.65 0.2 25 / 0.12);
-  --color-ai: oklch(0.72 0.18 230);
-  --color-ai-dim: oklch(0.72 0.18 230 / 0.12);
+  --color-success: oklch(0.74 0.16 152);
+  --color-success-dim: oklch(0.74 0.16 152 / 0.14);
+  --color-warn: oklch(0.79 0.15 75);
+  --color-warn-dim: oklch(0.79 0.15 75 / 0.14);
+  --color-danger: oklch(0.68 0.19 25);
+  --color-danger-dim: oklch(0.68 0.19 25 / 0.14);
+  --color-ai: oklch(0.74 0.16 240);
+  --color-ai-dim: oklch(0.74 0.16 240 / 0.14);
 
   --radius-default: 8px;
   --radius-lg: 14px;
@@ -43,7 +56,75 @@
   --spacing-topbar: 56px;
 }
 
-/* Backward-compatibility aliases for legacy `var(--cyan)` / `var(--bg1)` style usages. */
+/* Light theme: applied when the theme store stamps data-theme="light" on <html>,
+ * and (pre-hydration) when the OS prefers light and no explicit choice is set. */
+:root[data-theme='light'] {
+  --color-bg: #f4f7fb;
+  --color-bg1: #ffffff;
+  --color-bg2: #eef2f8;
+  --color-bg3: #e2e8f1;
+  --color-border: #d8e0ea;
+  --color-border2: #c4cfdd;
+  --color-text: #0f1729;
+  --color-text2: #47546b;
+  --color-text3: #64748b;
+  --color-on-primary: #ffffff;
+
+  --color-cyan: oklch(0.52 0.1 214);
+  --color-cyan-dim: oklch(0.52 0.1 214 / 0.12);
+  --color-cyan-glow: oklch(0.52 0.1 214 / 0.22);
+  --color-indigo: oklch(0.5 0.2 267);
+  --color-indigo-dim: oklch(0.5 0.2 267 / 0.12);
+  --color-violet: oklch(0.52 0.2 291);
+  --color-success: oklch(0.52 0.14 150);
+  --color-success-dim: oklch(0.52 0.14 150 / 0.13);
+  --color-warn: oklch(0.55 0.13 60);
+  --color-warn-dim: oklch(0.55 0.13 60 / 0.15);
+  --color-danger: oklch(0.53 0.2 26);
+  --color-danger-dim: oklch(0.53 0.2 26 / 0.11);
+  --color-ai: oklch(0.5 0.18 264);
+  --color-ai-dim: oklch(0.5 0.18 264 / 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --color-bg: #f4f7fb;
+    --color-bg1: #ffffff;
+    --color-bg2: #eef2f8;
+    --color-bg3: #e2e8f1;
+    --color-border: #d8e0ea;
+    --color-border2: #c4cfdd;
+    --color-text: #0f1729;
+    --color-text2: #47546b;
+    --color-text3: #64748b;
+    --color-on-primary: #ffffff;
+
+    --color-cyan: oklch(0.52 0.1 214);
+    --color-cyan-dim: oklch(0.52 0.1 214 / 0.12);
+    --color-cyan-glow: oklch(0.52 0.1 214 / 0.22);
+    --color-indigo: oklch(0.5 0.2 267);
+    --color-indigo-dim: oklch(0.5 0.2 267 / 0.12);
+    --color-violet: oklch(0.52 0.2 291);
+    --color-success: oklch(0.52 0.14 150);
+    --color-success-dim: oklch(0.52 0.14 150 / 0.13);
+    --color-warn: oklch(0.55 0.13 60);
+    --color-warn-dim: oklch(0.55 0.13 60 / 0.15);
+    --color-danger: oklch(0.53 0.2 26);
+    --color-danger-dim: oklch(0.53 0.2 26 / 0.11);
+    --color-ai: oklch(0.5 0.18 264);
+    --color-ai-dim: oklch(0.5 0.18 264 / 0.12);
+  }
+}
+
+/* Native form controls / scrollbars follow the active theme. */
+:root { color-scheme: dark; }
+:root[data-theme='light'] { color-scheme: light; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) { color-scheme: light; }
+}
+
+/* Backward-compatibility aliases for legacy `var(--cyan)` / `var(--bg1)` style usages.
+ * These reference the theme-aware `--color-*` vars, so they flip automatically. */
 :root {
   --bg: var(--color-bg);
   --bg1: var(--color-bg1);
@@ -54,6 +135,7 @@
   --text: var(--color-text);
   --text2: var(--color-text2);
   --text3: var(--color-text3);
+  --on-primary: var(--color-on-primary);
   --cyan: var(--color-cyan);
   --cyan-dim: var(--color-cyan-dim);
   --cyan-glow: var(--color-cyan-glow);
@@ -202,7 +284,9 @@ body {
   @apply opacity-40 cursor-not-allowed;
 }
 .qf-btn-primary {
-  @apply bg-cyan text-[#070a10] border-cyan;
+  background: var(--color-cyan);
+  color: var(--color-on-primary);
+  border-color: var(--color-cyan);
 }
 .qf-btn-primary:hover:not(:disabled) {
   filter: brightness(1.1);
@@ -249,7 +333,7 @@ body {
  * Badges
  * --------------------------------------------------------------------- */
 .qf-badge {
-  @apply inline-flex items-center gap-1 px-2 py-[2px] rounded-[20px] text-[11.5px] font-semibold;
+  @apply inline-flex items-center gap-1 px-2 py-[2px] rounded-[20px] text-[11.5px] font-semibold whitespace-nowrap;
 }
 .qf-badge-cyan { @apply bg-cyan-dim text-cyan; }
 .qf-badge-indigo { @apply bg-indigo-dim text-indigo; }

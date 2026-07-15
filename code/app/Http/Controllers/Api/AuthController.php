@@ -6,16 +6,16 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
     public function login(Request $request): JsonResponse
     {
+        // Authenticate on email + password only. The role is derived from the
+        // stored user and returned below — the client never sends or chooses it.
         $validated = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
-            'role' => ['required', Rule::in(['admin', 'teacher'])],
         ]);
 
         $user = \App\Models\User::where('email', $validated['email'])->first();
@@ -24,12 +24,6 @@ class AuthController extends Controller
             return response()->json([
                 'message' => 'Invalid credentials.',
             ], 422);
-        }
-
-        if ($user->role !== $validated['role']) {
-            return response()->json([
-                'message' => 'You are not authorized for this role.',
-            ], 403);
         }
 
         $user->tokens()->delete();

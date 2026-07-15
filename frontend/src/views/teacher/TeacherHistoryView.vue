@@ -62,7 +62,11 @@ const analytics = computed<Array<[string, string]>>(() => {
               <td>{{ p.questions }}</td>
               <td><QFBadge variant="neutral">{{ p.exports }}×</QFBadge></td>
               <td>
-                <QFButton variant="ghost" size="sm">View</QFButton>
+                <QFButton
+                  variant="ghost"
+                  size="sm"
+                  @click.stop="router.push(`/teacher/paper/${p.id}`)"
+                >View</QFButton>
               </td>
             </tr>
           </tbody>

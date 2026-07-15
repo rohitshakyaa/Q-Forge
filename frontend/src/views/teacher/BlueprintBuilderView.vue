@@ -30,7 +30,8 @@ const filtered = computed(() =>
 
 const newBlueprint = () => router.push('/teacher/blueprint/new');
 const edit = (bp: Blueprint) => router.push(`/teacher/blueprint/${bp.id}`);
-const generate = () => router.push('/teacher/generate');
+const generate = (bp: Blueprint) =>
+  router.push({ path: '/teacher/generate', query: { bp: String(bp.id) } });
 
 const confirmDelete = async () => {
   if (deleteConfirm.value) {
@@ -60,11 +61,11 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
 <template>
   <div class="qf-content qf-anim-in">
     <QFPageHeader
-      title="Blueprint Builder"
+      title="Blueprints"
       subtitle="Create and manage your paper structure templates"
       :breadcrumbs="[
         { label: 'Dashboard', to: '/teacher' },
-        { label: 'Blueprint Builder' },
+        { label: 'Blueprints' },
       ]"
     >
       <template #actions>
@@ -74,22 +75,26 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
 
     <div style="display: flex; gap: 12px; margin-bottom: 20px; align-items: center">
       <div style="position: relative; flex: 1; max-width: 380px">
-        <span
-          style="
-            position: absolute;
-            left: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text3);
-            font-size: 14px;
-            pointer-events: none;
-          "
-        >⌕</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m21 21-4.3-4.3" />
+        </svg>
         <input
           v-model="search"
           class="qf-input"
           placeholder="Search blueprints by name or subject…"
-          style="padding-left: 34px"
+          style="padding-left: 36px"
         />
       </div>
       <QFButton v-if="search" variant="ghost" size="sm" @click="search = ''">Clear</QFButton>
@@ -117,12 +122,12 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
         gap: 16px;
       "
     >
-      <QFCard v-for="bp in filtered" :key="bp.id">
-        <div class="qf-card-body">
+      <QFCard v-for="bp in filtered" :key="bp.id" style="display: flex; flex-direction: column">
+        <div class="qf-card-body" style="display: flex; flex-direction: column; flex: 1">
           <div
-            style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px"
+            style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px"
           >
-            <div>
+            <div style="min-width: 0">
               <div style="font-family: var(--font-head); font-weight: 700; font-size: 15px; margin-bottom: 5px">
                 {{ bp.name }}
               </div>
@@ -137,7 +142,7 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
                 "
               >{{ bp.subject }}</span>
             </div>
-            <QFBadge v-if="bp.aiAssist" variant="ai">✦ AI</QFBadge>
+            <QFBadge v-if="bp.aiAssist" variant="ai" style="flex-shrink: 0">✦ AI</QFBadge>
           </div>
 
           <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap">
@@ -232,9 +237,9 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
             Last used: {{ bp.lastUsed }} · Excludes last {{ bp.exclusionRules.lastNPapers }} papers
           </div>
 
-          <div style="display: flex; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px">
+          <div style="display: flex; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto">
             <QFButton variant="secondary" size="sm" block @click="edit(bp)">✏ Edit</QFButton>
-            <QFButton variant="primary" size="sm" block @click="generate">✦ Generate</QFButton>
+            <QFButton variant="primary" size="sm" block @click="generate(bp)">✦ Generate</QFButton>
             <QFButton variant="danger" size="sm" @click="deleteConfirm = bp">✕</QFButton>
           </div>
         </div>

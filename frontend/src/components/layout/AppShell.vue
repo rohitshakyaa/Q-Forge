@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
+import { useThemeStore } from '../../stores/theme';
 import type { UserRole } from '../../types/auth';
 import QFSidebar from './QFSidebar.vue';
 
@@ -10,6 +11,7 @@ defineProps<{
 }>();
 
 const authStore = useAuthStore();
+const theme = useThemeStore();
 const router = useRouter();
 const sidebarOpen = ref(false);
 
@@ -43,7 +45,14 @@ const closeSidebar = () => {
         </div>
         <span class="font-head font-bold text-base tracking-tight">QForge</span>
       </div>
-      <div class="w-10" aria-hidden="true" />
+      <button
+        type="button"
+        class="qf-hamburger"
+        :aria-label="`Switch to ${theme.isDark ? 'light' : 'dark'} mode`"
+        @click="theme.toggle()"
+      >
+        <span class="text-lg leading-none">{{ theme.isDark ? '☾' : '☀' }}</span>
+      </button>
     </div>
     <div class="qf-layout relative">
       <div

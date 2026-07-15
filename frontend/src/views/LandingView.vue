@@ -117,7 +117,6 @@ const goToLogin = () => router.push('/login');
         <QFButton variant="primary" size="lg" @click="goToLogin">
           Start for free →
         </QFButton>
-        <QFButton variant="secondary" size="lg" @click="goToLogin">View demo</QFButton>
       </div>
     </div>
 

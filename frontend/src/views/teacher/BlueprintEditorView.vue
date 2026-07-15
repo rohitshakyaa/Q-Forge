@@ -429,7 +429,7 @@ const exclusionRules = [
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '12px',
-                    color: '#070a10',
+                    color: 'var(--on-primary)',
                     flexShrink: 0,
                   }"
                 >{{ active ? '✓' : '' }}</div>

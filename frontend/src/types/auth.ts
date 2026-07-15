@@ -10,7 +10,6 @@ export interface AuthUser {
 export interface LoginPayload {
   email: string;
   password: string;
-  role: UserRole;
 }
 
 export interface LoginResponse {

@@ -1,6 +1,5 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
-import { useStorage } from '@vueuse/core';
 import api from '../api/client/axios';
 
 export interface CatalogQuestion {
@@ -34,15 +33,6 @@ export interface Subject {
 export interface BankQuestion extends CatalogQuestion {
   subject: string; // subject code
   unit: string; // unit name
-}
-
-export interface CatalogUser {
-  name: string;
-  email: string;
-  role: 'Teacher' | 'Admin';
-  subjects: string[];
-  status: 'active' | 'inactive';
-  lastSeen: string;
 }
 
 export interface QuestionFilters {
@@ -146,9 +136,6 @@ export const useCatalogStore = defineStore('catalog', () => {
   const questions = ref<BankQuestion[]>([]);
   const questionMeta = ref<PageMeta>({ currentPage: 1, lastPage: 1, total: 0, perPage: 20 });
 
-  // Out of M1 scope (user management is later) — keep mock-backed users for now.
-  const users = useStorage<CatalogUser[]>('qforge-users', []);
-
   const getSubject = (code: string) =>
     current.value?.code === code ? current.value : (subjects.value.find((s) => s.code === code) ?? null);
 
@@ -246,7 +233,6 @@ export const useCatalogStore = defineStore('catalog', () => {
   return {
     subjects,
     current,
-    users,
     questions,
     questionMeta,
     questionBank,

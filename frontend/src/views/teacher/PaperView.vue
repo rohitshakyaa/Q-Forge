@@ -1,14 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import {
-  QFAIHint,
-  QFBadge,
-  QFButton,
-  QFModal,
-  QFPageHeader,
-} from '../../components/qf';
-import { usePapersStore, type PaperQuestion } from '../../stores/papers';
+import { QFBadge, QFButton, QFPageHeader } from '../../components/qf';
+import { usePapersStore } from '../../stores/papers';
 
 const route = useRoute();
 const router = useRouter();
@@ -16,10 +10,7 @@ const store = usePapersStore();
 
 const paperId = Number(route.params.id);
 const paper = computed(() => store.getById(paperId));
-
-const editMode = ref(false);
 const saving = ref(false);
-const showReplace = ref<PaperQuestion | null>(null);
 
 // Always load authoritatively on mount so direct links, refreshes, and History
 // navigation work (and we pick up status/export_count changes after export).
@@ -33,21 +24,6 @@ const save = async () => {
   } finally {
     saving.value = false;
   }
-};
-
-const alternatives = [
-  "Explain Prim's algorithm for minimum spanning tree with a worked example.",
-  'What is the significance of a spanning tree in a graph? Derive the number of possible spanning trees.',
-  "Compare Prim's and Kruskal's algorithms for finding MST. When would you prefer each?",
-];
-
-const onHover = (e: MouseEvent, enter: boolean) => {
-  if (!editMode.value) return;
-  (e.currentTarget as HTMLElement).style.borderColor = enter ? 'var(--cyan)' : 'var(--border2)';
-};
-
-const onAltHover = (e: MouseEvent, enter: boolean) => {
-  (e.currentTarget as HTMLElement).style.borderColor = enter ? 'var(--cyan)' : 'var(--border)';
 };
 </script>
 
@@ -63,9 +39,6 @@ const onAltHover = (e: MouseEvent, enter: boolean) => {
       ]"
     >
       <template #actions>
-        <QFButton variant="ghost" size="sm" @click="editMode = !editMode">
-          {{ editMode ? 'Done Editing' : '✏ Edit' }}
-        </QFButton>
         <QFButton variant="secondary" size="sm" :disabled="saving || paper.status === 'saved'" @click="save">
           {{ paper.status === 'saved' ? 'Saved' : saving ? 'Saving…' : 'Save' }}
         </QFButton>
@@ -74,10 +47,6 @@ const onAltHover = (e: MouseEvent, enter: boolean) => {
         </QFButton>
       </template>
     </QFPageHeader>
-
-    <QFAIHint v-if="editMode" style="margin-bottom: 16px">
-      Edit mode active — click any question to replace it, or drag to reorder. AI can suggest alternatives below.
-    </QFAIHint>
 
     <div style="max-width: 740px; margin: 0 auto">
       <div
@@ -146,17 +115,13 @@ const onAltHover = (e: MouseEvent, enter: boolean) => {
           <div
             v-for="q in sec.questions"
             :key="q.no"
-            :style="{
-              background: 'var(--bg1)',
-              border: `1px solid ${editMode ? 'var(--border2)' : 'var(--border)'}`,
-              borderRadius: 'var(--radius-lg)',
-              padding: '14px 18px',
-              transition: 'all 0.15s',
-              cursor: editMode ? 'pointer' : 'default',
-              position: 'relative',
-            }"
-            @mouseenter="(e) => onHover(e, true)"
-            @mouseleave="(e) => onHover(e, false)"
+            style="
+              background: var(--bg1);
+              border: 1px solid var(--border);
+              border-radius: var(--radius-lg);
+              padding: 14px 18px;
+              position: relative;
+            "
           >
             <div style="display: flex; gap: 14px; align-items: flex-start">
               <span
@@ -176,80 +141,19 @@ const onAltHover = (e: MouseEvent, enter: boolean) => {
                   <QFBadge v-if="q.ai" variant="ai">✦ AI Generated</QFBadge>
                 </div>
               </div>
-              <div
+              <span
                 style="
-                  display: flex;
-                  flex-direction: column;
-                  align-items: flex-end;
-                  gap: 6px;
+                  font-family: var(--font-mono);
+                  font-size: 13px;
+                  font-weight: 700;
+                  color: var(--text2);
                   flex-shrink: 0;
                 "
-              >
-                <span
-                  style="
-                    font-family: var(--font-mono);
-                    font-size: 13px;
-                    font-weight: 700;
-                    color: var(--text2);
-                  "
-                >[{{ q.marks }}M]</span>
-                <QFButton
-                  v-if="editMode"
-                  variant="secondary"
-                  size="sm"
-                  @click="showReplace = q"
-                >Replace</QFButton>
-              </div>
+              >[{{ q.marks }}M]</span>
             </div>
           </div>
         </div>
       </div>
     </div>
-
-    <QFModal
-      :open="!!showReplace"
-      title="Replace Question"
-      :width="580"
-      @close="showReplace = null"
-    >
-      <div style="margin-bottom: 14px">
-        <div style="font-size: 12px; color: var(--text3); margin-bottom: 6px">Current question</div>
-        <div
-          style="
-            background: var(--bg2);
-            border-radius: var(--radius);
-            padding: 10px 14px;
-            font-size: 13px;
-            color: var(--text2);
-            line-height: 1.6;
-          "
-        >{{ showReplace?.text }}</div>
-      </div>
-      <QFAIHint style="margin-bottom: 14px">
-        AI found 3 alternatives matching the same unit, marks, and type.
-      </QFAIHint>
-      <div style="display: flex; flex-direction: column; gap: 8px">
-        <div
-          v-for="(alt, i) in alternatives"
-          :key="i"
-          style="
-            padding: 12px;
-            background: var(--bg2);
-            border-radius: var(--radius);
-            border: 1px solid var(--border);
-            cursor: pointer;
-            font-size: 13px;
-            line-height: 1.6;
-            color: var(--text);
-          "
-          @mouseenter="(e) => onAltHover(e, true)"
-          @mouseleave="(e) => onAltHover(e, false)"
-        >{{ alt }}</div>
-      </div>
-      <template #footer>
-        <QFButton variant="ghost" @click="showReplace = null">Cancel</QFButton>
-        <QFButton variant="primary" @click="showReplace = null">Replace Question</QFButton>
-      </template>
-    </QFModal>
   </div>
 </template>

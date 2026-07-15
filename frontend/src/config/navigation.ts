@@ -42,7 +42,7 @@ export const navigationByRole: Record<UserRole, NavSection[]> = {
     {
       label: 'Papers',
       items: [
-        { title: 'Blueprint Builder', path: '/teacher/blueprint', icon: '⬢' },
+        { title: 'Blueprints', path: '/teacher/blueprint', icon: '⬢' },
         { title: 'Generate Paper', path: '/teacher/generate', icon: '✦' },
       ],
     },

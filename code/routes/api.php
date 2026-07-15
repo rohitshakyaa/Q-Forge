@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\PaperController;
 use App\Http\Controllers\Api\PastPaperController;
 use App\Http\Controllers\Api\DocumentUploadController;
 use App\Http\Controllers\Api\QuestionReviewController;
+use App\Http\Controllers\Api\UserController;
 use App\Services\PythonService;
 
 Route::get('/user', function (Request $request) {
@@ -73,6 +74,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Admin-only writes for the catalog + full question management.
     Route::middleware('role:admin')->group(function () {
+        // Users & Roles — admin-provisioned accounts (no public signup).
+        Route::apiResource('users', UserController::class)->only(['index', 'store', 'update', 'destroy']);
+
         Route::apiResource('subjects', SubjectController::class)->except(['index', 'show']);
         Route::apiResource('subjects.units', UnitController::class)->shallow()->except(['index']);
 

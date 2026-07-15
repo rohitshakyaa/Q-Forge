@@ -3,8 +3,11 @@ import { ref, onBeforeUnmount } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import type { UserRole } from '../../types/auth';
 import { navigationByRole } from '../../config/navigation';
+import { useThemeStore } from '../../stores/theme';
 import QFBadge from '../qf/QFBadge.vue';
 import QFAvatar from '../qf/QFAvatar.vue';
+
+const theme = useThemeStore();
 
 const props = defineProps<{
   role: UserRole;
@@ -19,7 +22,15 @@ const emit = defineEmits<{
 const route = useRoute();
 const sections = navigationByRole[props.role];
 
-const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`);
+const isActive = (path: string) => {
+  if (route.path === path) return true;
+  // Prefix match keeps a parent highlighted on its child routes
+  // (e.g. /admin/subjects stays active on /admin/subjects/CS301), but a section
+  // root like /admin or /teacher must match exactly — otherwise the Dashboard
+  // item lights up on every route inside the shell.
+  const isSectionRoot = path.split('/').filter(Boolean).length <= 1;
+  return !isSectionRoot && route.path.startsWith(`${path}/`);
+};
 
 const menuOpen = ref(false);
 const menuRef = ref<HTMLElement | null>(null);
@@ -90,9 +101,29 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="grow" />
+
+    <div class="px-2 pt-2">
+      <button
+        type="button"
+        class="qf-nav-item w-full bg-transparent border-none cursor-pointer"
+        style="font: inherit;"
+        :aria-label="`Switch to ${theme.isDark ? 'light' : 'dark'} mode`"
+        @click="theme.toggle()"
+      >
+        <span class="text-base">{{ theme.isDark ? '☾' : '☀' }}</span>
+        <span>{{ theme.isDark ? 'Dark' : 'Light' }} mode</span>
+        <span
+          class="ml-auto inline-flex items-center w-9 h-5 rounded-full px-[3px] transition-colors"
+          :class="theme.isDark ? 'bg-bg3 justify-start' : 'bg-cyan justify-end'"
+        >
+          <span class="w-3.5 h-3.5 rounded-full bg-text block" />
+        </span>
+      </button>
+    </div>
+
     <div
       ref="menuRef"
-      class="relative px-2 py-3 border-t border-border mt-2"
+      class="relative px-2 py-3 border-t border-border mt-1"
     >
       <button
         type="button"

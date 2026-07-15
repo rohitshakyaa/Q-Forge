@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   QFAIHint,
   QFBadge,
@@ -14,6 +14,7 @@ import {
 import { useBlueprintsStore, type Blueprint } from '../../stores/blueprints';
 import { usePapersStore } from '../../stores/papers';
 
+const route = useRoute();
 const router = useRouter();
 const blueprintsStore = useBlueprintsStore();
 const papersStore = usePapersStore();
@@ -25,7 +26,19 @@ const bpSearch = ref('');
 
 papersStore.resetGeneration();
 
-onMounted(() => blueprintsStore.fetch());
+onMounted(async () => {
+  await blueprintsStore.fetch();
+  // Deep-linked from the Blueprints list ("Generate" on a card): pre-select that
+  // blueprint and skip straight to the configuration step.
+  const bpId = Number(route.query.bp);
+  if (bpId) {
+    const match = blueprintsStore.list.find((b) => b.id === bpId);
+    if (match) {
+      selectedBP.value = match;
+      phase.value = 'idle';
+    }
+  }
+});
 
 const blueprints = computed(() =>
   blueprintsStore.list.filter(
@@ -105,22 +118,26 @@ const unitBreakdown = (bp: Blueprint) =>
 
       <div style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center">
         <div style="position: relative; flex: 1; max-width: 340px">
-          <span
-            style="
-              position: absolute;
-              left: 12px;
-              top: 50%;
-              transform: translateY(-50%);
-              color: var(--text3);
-              font-size: 14px;
-              pointer-events: none;
-            "
-          >⌕</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
           <input
             v-model="bpSearch"
             class="qf-input"
             placeholder="Search blueprints…"
-            style="padding-left: 34px"
+            style="padding-left: 36px"
           />
         </div>
         <QFButton v-if="bpSearch" variant="ghost" size="sm" @click="bpSearch = ''">Clear</QFButton>
@@ -160,11 +177,13 @@ const unitBreakdown = (bp: Blueprint) =>
             cursor: 'pointer',
             transition: 'all 0.15s',
             boxShadow: selectedBP?.id === bp.id ? '0 0 20px var(--cyan-glow)' : 'none',
+            display: 'flex',
+            flexDirection: 'column',
           }"
           @click="selectedBP = bp"
         >
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px">
-            <div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px">
+            <div style="min-width: 0">
               <div style="font-family: var(--font-head); font-weight: 700; font-size: 15px; margin-bottom: 3px">
                 {{ bp.name }}
               </div>
@@ -189,7 +208,7 @@ const unitBreakdown = (bp: Blueprint) =>
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                color: #070a10;
+                color: var(--on-primary);
                 font-size: 12px;
                 font-weight: 700;
                 flex-shrink: 0;
@@ -264,7 +283,7 @@ const unitBreakdown = (bp: Blueprint) =>
               color: var(--text3);
               border-top: 1px solid var(--border);
               padding-top: 8px;
-              margin-top: 4px;
+              margin-top: auto;
             "
           >Last used: {{ bp.lastUsed }}</div>
         </div>
