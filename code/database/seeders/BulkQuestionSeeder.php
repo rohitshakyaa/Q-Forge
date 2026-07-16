@@ -8,20 +8,27 @@ use App\Models\Unit;
 use Illuminate\Database\Seeder;
 
 /**
- * Deepens the question bank for every existing subject/unit with a realistic
+ * Deepens the question bank for the synthetic demo subjects with a realistic
  * spread of types and marks, so the generation engine has a large candidate
  * pool to exercise (unit balancing, LRU, backtracking) against.
  *
- * Idempotent: it removes its own previously-seeded bulk questions (tagged via
- * attributes->bulk = true) before re-inserting, so re-running won't pile up
- * duplicates. The hand-written demo questions from QForgeDemoSeeder are left
- * untouched.
+ * Only the SUBJECT_CODES demo subjects get filler — real subjects seeded from
+ * actual syllabi/past papers (e.g. TuPastPaperSeeder) must stay clean, so this
+ * seeder never touches them.
+ *
+ * Idempotent: it removes ALL previously-seeded bulk questions (tagged via
+ * attributes->bulk = true) before re-inserting — including any left on
+ * subjects that are no longer bulk targets — so re-running won't pile up
+ * duplicates and also cleans up strays.
  *
  * Tune the volume with PER_UNIT (questions added per unit). With 5 units that
  * is PER_UNIT * 5 per subject — e.g. 40 => 200 per subject.
  */
 class BulkQuestionSeeder extends Seeder
 {
+    /** Demo subjects that receive bulk filler (never real, imported subjects). */
+    private const SUBJECT_CODES = ['CS301', 'CS303'];
+
     /** Questions to add per unit. */
     private const PER_UNIT = 40;
 
@@ -43,10 +50,14 @@ class BulkQuestionSeeder extends Seeder
 
     public function run(): void
     {
-        $subjects = Subject::with('units')->get();
+        // Idempotent + cleanup: drop every bulk question wherever it lives,
+        // including on subjects that are no longer bulk targets.
+        Question::whereJsonContains('attributes->bulk', true)->delete();
+
+        $subjects = Subject::with('units')->whereIn('code', self::SUBJECT_CODES)->get();
 
         if ($subjects->isEmpty()) {
-            $this->command?->warn('No subjects found — run QForgeDemoSeeder first.');
+            $this->command?->warn('No demo subjects found — run QForgeDemoSeeder first.');
 
             return;
         }
@@ -65,11 +76,6 @@ class BulkQuestionSeeder extends Seeder
 
     private function seedUnit(Subject $subject, Unit $unit): void
     {
-        // Idempotent: clear this unit's prior bulk questions before re-inserting.
-        Question::where('unit_id', $unit->id)
-            ->whereJsonContains('attributes->bulk', true)
-            ->delete();
-
         $plan = $this->expandMix(self::PER_UNIT);
 
         foreach ($plan as $n => [$type, $marks]) {
@@ -78,7 +84,6 @@ class BulkQuestionSeeder extends Seeder
                 'unit_id' => $unit->id,
                 'type' => $type,
                 'marks' => $marks,
-                'difficulty' => ['easy', 'medium', 'hard'][$n % 3],
                 'text' => $this->questionText($subject, $unit, $type, $marks, $n + 1),
                 'source' => 'manual',
                 'status' => 'approved',

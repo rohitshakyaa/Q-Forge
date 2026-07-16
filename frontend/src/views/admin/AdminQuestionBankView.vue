@@ -8,7 +8,6 @@ const catalog = useCatalogStore();
 const search = ref('');
 const subjectFilter = ref('all');
 const typeFilter = ref('All Types');
-const difficultyFilter = ref('All Difficulties');
 const page = ref(1);
 
 const subjectOptions = computed(() => [
@@ -21,7 +20,6 @@ const load = () =>
     status: 'approved',
     subject: subjectFilter.value,
     type: typeFilter.value === 'All Types' ? undefined : typeFilter.value,
-    difficulty: difficultyFilter.value === 'All Difficulties' ? undefined : difficultyFilter.value,
     search: search.value || undefined,
     page: page.value,
   });
@@ -32,19 +30,13 @@ onMounted(async () => {
 });
 
 // Reset to the first page and reload whenever a filter changes.
-watch([subjectFilter, typeFilter, difficultyFilter, search], () => {
+watch([subjectFilter, typeFilter, search], () => {
   page.value = 1;
   load();
 });
 watch(page, load);
 
 const meta = computed(() => catalog.questionMeta);
-
-const diffColor: Record<string, string> = {
-  Easy: 'var(--success)',
-  Medium: 'var(--warn)',
-  Hard: 'var(--danger)',
-};
 </script>
 
 <template>
@@ -77,12 +69,6 @@ const diffColor: Record<string, string> = {
           :options="['All Types', 'Short Answer', 'Long Answer', 'MCQ']"
         />
       </div>
-      <div class="w-full sm:w-40">
-        <QFSelect
-          v-model="difficultyFilter"
-          :options="['All Difficulties', 'Easy', 'Medium', 'Hard']"
-        />
-      </div>
     </div>
 
     <QFCard>
@@ -95,7 +81,6 @@ const diffColor: Record<string, string> = {
             <th>Unit</th>
             <th>Type</th>
             <th>Marks</th>
-            <th>Difficulty</th>
             <th>Used</th>
           </tr>
         </thead>
@@ -130,15 +115,6 @@ const diffColor: Record<string, string> = {
             <td><QFBadge variant="neutral">{{ q.type }}</QFBadge></td>
             <td style="font-family: var(--font-mono); font-size: 13px; font-weight: 600">
               {{ q.marks }}
-            </td>
-            <td>
-              <span
-                :style="{
-                  color: q.difficulty ? diffColor[q.difficulty] : 'var(--text3)',
-                  fontSize: '12.5px',
-                  fontWeight: 600,
-                }"
-              >{{ q.difficulty ?? '—' }}</span>
             </td>
             <td>
               <div style="display: flex; align-items: center; gap: 4px">

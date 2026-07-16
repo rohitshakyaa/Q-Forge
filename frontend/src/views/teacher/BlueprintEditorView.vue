@@ -571,7 +571,6 @@ const exclusionRules = [
             </div>
             <div
               v-for="[id, lbl] in [
-                ['balanceDiff2', 'Balance difficulty distribution (Easy / Medium / Hard)'],
                 ['strictUnits2', 'Strict unit proportionality across required units'],
               ]"
               :key="id"

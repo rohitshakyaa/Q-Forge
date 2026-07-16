@@ -141,7 +141,6 @@ const questionModal = reactive({
   text: '',
   marks: 5,
   type: 'Short Answer',
-  difficulty: 'Medium' as 'Easy' | 'Medium' | 'Hard',
 });
 
 const openAddQuestion = (unitId: number | null = null) => {
@@ -152,7 +151,6 @@ const openAddQuestion = (unitId: number | null = null) => {
   questionModal.text = '';
   questionModal.marks = 5;
   questionModal.type = 'Short Answer';
-  questionModal.difficulty = 'Medium';
 };
 
 // A question can also cover units beyond its primary one.
@@ -176,7 +174,6 @@ const saveQuestion = async () => {
     text: questionModal.text.trim(),
     marks: questionModal.marks,
     type: questionModal.type,
-    difficulty: questionModal.difficulty,
   });
   questionModal.open = false;
 };
@@ -251,12 +248,6 @@ const saveSyllabus = async () => {
 const deleteQuestion = async (_unitId: number, questionId: number) => {
   if (!subject.value) return;
   await catalog.deleteQuestion(code.value, questionId);
-};
-
-const diffColor: Record<string, string> = {
-  Easy: 'var(--success)',
-  Medium: 'var(--warn)',
-  Hard: 'var(--danger)',
 };
 </script>
 
@@ -409,7 +400,6 @@ const diffColor: Record<string, string> = {
                 <th>Unit</th>
                 <th>Type</th>
                 <th>Marks</th>
-                <th>Difficulty</th>
                 <th>Used</th>
                 <th></th>
               </tr>
@@ -439,15 +429,6 @@ const diffColor: Record<string, string> = {
                 </td>
                 <td><QFBadge variant="neutral">{{ q.type }}</QFBadge></td>
                 <td style="font-family: var(--font-mono); font-size: 13px; font-weight: 600">{{ q.marks }}</td>
-                <td>
-                  <span
-                    :style="{
-                      color: q.difficulty ? diffColor[q.difficulty] : 'var(--text3)',
-                      fontSize: '12.5px',
-                      fontWeight: 600,
-                    }"
-                  >{{ q.difficulty ?? '—' }}</span>
-                </td>
                 <td style="font-size: 12px; color: var(--text3)">{{ q.used ?? 0 }}×</td>
                 <td>
                   <QFButton
@@ -652,7 +633,7 @@ const diffColor: Record<string, string> = {
             :rows="4"
             placeholder="Enter the question…"
           />
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <QFInput
               :model-value="questionModal.marks"
               label="Marks"
@@ -663,11 +644,6 @@ const diffColor: Record<string, string> = {
               v-model="questionModal.type"
               label="Type"
               :options="['Short Answer', 'Long Answer', 'MCQ']"
-            />
-            <QFSelect
-              v-model="questionModal.difficulty"
-              label="Difficulty"
-              :options="['Easy', 'Medium', 'Hard']"
             />
           </div>
         </div>

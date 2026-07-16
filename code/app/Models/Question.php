@@ -18,7 +18,6 @@ class Question extends Model
         'unit_id',
         'type',
         'marks',
-        'difficulty',
         'text',
         'source',
         'status',

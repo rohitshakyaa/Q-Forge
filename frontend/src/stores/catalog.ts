@@ -7,7 +7,6 @@ export interface CatalogQuestion {
   text: string;
   marks: number;
   type: string;
-  difficulty?: 'Easy' | 'Medium' | 'Hard';
   used?: number;
   /** Every unit the question is tagged with (primary included). */
   unitIds: number[];
@@ -42,7 +41,6 @@ export interface QuestionFilters {
   subject?: string; // code
   unit?: number; // id
   type?: string; // display label
-  difficulty?: string; // display label
   status?: string;
   search?: string;
   page?: number;
@@ -67,24 +65,14 @@ const TYPE_FROM_API: Record<string, string> = {
   long: 'Long Answer',
   mcq: 'MCQ',
 };
-const DIFF_TO_API: Record<string, string> = { Easy: 'easy', Medium: 'medium', Hard: 'hard' };
-const DIFF_FROM_API: Record<string, CatalogQuestion['difficulty']> = {
-  easy: 'Easy',
-  medium: 'Medium',
-  hard: 'Hard',
-};
-
 const toApiType = (t?: string) => (t ? (TYPE_TO_API[t] ?? t.toLowerCase()) : undefined);
 const fromApiType = (t: string) => TYPE_FROM_API[t] ?? t;
-const toApiDiff = (d?: string) => (d ? (DIFF_TO_API[d] ?? d.toLowerCase()) : undefined);
-const fromApiDiff = (d?: string | null) => (d ? DIFF_FROM_API[d] : undefined);
 
 interface ApiQuestion {
   id: number;
   text: string;
   marks: number;
   type: string;
-  difficulty: string | null;
   used_count: number;
   subject_code?: string;
   unit_name?: string;
@@ -113,7 +101,6 @@ const mapQuestion = (q: ApiQuestion): CatalogQuestion => ({
   text: q.text,
   marks: q.marks,
   type: fromApiType(q.type),
-  difficulty: fromApiDiff(q.difficulty),
   used: q.used_count,
   unitIds: q.unit_ids ?? [],
   units: q.units ?? [],
@@ -197,7 +184,6 @@ export const useCatalogStore = defineStore('catalog', () => {
       text: string;
       marks: number;
       type: string;
-      difficulty?: string;
       /** Extra units the question also covers (primary excluded). */
       additionalUnitIds?: number[];
     },
@@ -211,7 +197,6 @@ export const useCatalogStore = defineStore('catalog', () => {
       text: payload.text,
       marks: payload.marks,
       type: toApiType(payload.type),
-      difficulty: toApiDiff(payload.difficulty),
     });
     await loadSubject(code);
   }
@@ -231,8 +216,6 @@ export const useCatalogStore = defineStore('catalog', () => {
     if (filters.unit) params.unit = filters.unit;
     const apiType = toApiType(filters.type);
     if (apiType) params.type = apiType;
-    const apiDiff = toApiDiff(filters.difficulty);
-    if (apiDiff) params.difficulty = apiDiff;
     if (filters.search) params.search = filters.search;
 
     const { data } = await api.get('/questions', { params });

@@ -25,7 +25,6 @@ class QuestionRequest extends FormRequest
             'unit_ids.*' => ['integer', Rule::exists('units', 'id')],
             'type' => [$required, 'string', Rule::in(['short', 'long', 'mcq'])],
             'marks' => [$required, 'integer', 'min:1'],
-            'difficulty' => ['nullable', Rule::in(['easy', 'medium', 'hard'])],
             'text' => [$required, 'string'],
             'source' => ['sometimes', Rule::in(['extracted', 'ai', 'manual'])],
             'status' => ['sometimes', Rule::in(['pending', 'approved', 'rejected'])],

@@ -13,7 +13,7 @@ class QuestionController extends Controller
 {
     /**
      * Paginated, filterable question bank.
-     * Filters: subject (code), unit (id), type, difficulty, status, upload (id).
+     * Filters: subject (code), unit (id), type, status, upload (id).
      */
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -27,7 +27,6 @@ class QuestionController extends Controller
             // Any-tag match: a multi-unit question surfaces under every unit it touches.
             ->when($request->filled('unit'), fn ($q) => $q->whereHas('units', fn ($u) => $u->where('units.id', $request->input('unit'))))
             ->when($request->filled('type'), fn ($q) => $q->where('type', $request->input('type')))
-            ->when($request->filled('difficulty'), fn ($q) => $q->where('difficulty', $request->input('difficulty')))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->input('status')))
             ->when($request->filled('search'), fn ($q) => $q->where('text', 'like', '%'.$request->input('search').'%'))
             ->orderByDesc('id')

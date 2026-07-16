@@ -71,7 +71,6 @@ class QuestionReviewApiTest extends TestCase
             'unit_id' => $second->id,
             'marks' => 10,
             'type' => 'long',
-            'difficulty' => 'hard',
             'text' => 'Explain hash collisions and two resolution strategies.',
         ])->assertOk()->assertJsonPath('data.status', 'approved');
 

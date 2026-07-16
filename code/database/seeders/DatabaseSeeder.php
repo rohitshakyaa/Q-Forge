@@ -16,7 +16,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             AdminUserSeeder::class,
-            QForgeDemoSeeder::class,
+            // QForgeDemoSeeder::class,
             TuPastPaperSeeder::class,
         ]);
     }

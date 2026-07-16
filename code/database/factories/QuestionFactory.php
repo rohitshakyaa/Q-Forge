@@ -23,7 +23,6 @@ class QuestionFactory extends Factory
             'unit_id' => Unit::factory()->for($subject),
             'type' => fake()->randomElement(['short', 'long', 'mcq']),
             'marks' => fake()->randomElement([2, 4, 5, 10]),
-            'difficulty' => fake()->randomElement(['easy', 'medium', 'hard']),
             'text' => fake()->sentence(),
             'source' => 'manual',
             'status' => 'approved',

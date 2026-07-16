@@ -14,7 +14,7 @@ use App\Models\Unit;
  * Grounding is mandatory: an ungrounded model invents plausible-but-off-syllabus
  * questions. The block is `subjects.syllabus` (course overview) + each target
  * unit's `units.content` (unit body) + up to three approved exemplars of the same
- * subject/units/type, for style and difficulty. A slot may target TWO units (the
+ * subject/units/type, for style. A slot may target TWO units (the
  * generated question must span both); each gets its own block plus a bridging
  * directive. It degrades gracefully — a unit predating the M4.1 content backfill
  * falls back to the syllabus alone — and records what it had to drop in `notes`
@@ -61,7 +61,7 @@ class GroundingBuilder
             $lines = $exemplars->values()->map(
                 fn (Question $q, int $i) => ($i + 1).'. '.trim($q->text)
             )->implode("\n");
-            $parts[] = "# Example {$type} questions (match this style and difficulty)\n{$lines}";
+            $parts[] = "# Example {$type} questions (match this style)\n{$lines}";
         } else {
             $notes[] = 'no exemplars available (thin unit)';
         }

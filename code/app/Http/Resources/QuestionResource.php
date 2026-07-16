@@ -27,7 +27,6 @@ class QuestionResource extends JsonResource
                 ->map(fn ($unit) => ['id' => $unit->id, 'name' => $unit->name])),
             'type' => $this->type,
             'marks' => $this->marks,
-            'difficulty' => $this->difficulty,
             'text' => $this->text,
             'source' => $this->source,
             'status' => $this->status,

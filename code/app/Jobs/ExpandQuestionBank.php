@@ -220,7 +220,6 @@ class ExpandQuestionBank implements ShouldQueue
                 'unit_id' => $unitIds[0] ?? null,  // primary = scarcest target unit
                 'type' => $type,      // stamped from the slot, not the model
                 'marks' => $marks,    // stamped from the slot, not the model
-                'difficulty' => 'medium',
                 'text' => $text,
                 'source' => 'ai',
                 'status' => 'approved',

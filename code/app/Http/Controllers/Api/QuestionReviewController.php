@@ -30,7 +30,6 @@ class QuestionReviewController extends Controller
             'unit_ids.*' => ['integer', 'exists:units,id'],
             'marks' => ['nullable', 'integer', 'min:1', 'max:100'],
             'type' => ['nullable', Rule::in(['short', 'long', 'mcq'])],
-            'difficulty' => ['nullable', Rule::in(['easy', 'medium', 'hard'])],
             'text' => ['nullable', 'string'],
         ]);
 

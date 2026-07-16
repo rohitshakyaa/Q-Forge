@@ -20,69 +20,69 @@ class QForgeDemoSeeder extends Seeder
     {
         $cs301 = $this->seedSubject('CS301', 'Data Structures', [
             'Arrays & Linked Lists' => [
-                ['short', 4, 'easy', 'What is the time complexity of inserting at the head of a linked list?'],
-                ['short', 4, 'easy', 'Differentiate between a stack and a queue.'],
-                ['short', 4, 'easy', 'What is a circular linked list and where is it used?'],
-                ['short', 4, 'medium', 'Explain how a doubly linked list differs from a singly linked list.'],
-                ['long', 10, 'medium', 'Compare arrays and linked lists in terms of memory layout and access time.'],
-                ['long', 10, 'medium', 'Explain how a dynamic array grows and analyse its amortised insertion cost.'],
-                ['long', 10, 'hard', 'Describe how to detect and remove a cycle in a singly linked list.'],
-                ['mcq', 2, 'easy', 'Which structure uses LIFO ordering? (a) Queue (b) Stack (c) Tree (d) Graph'],
+                ['short', 4, 'What is the time complexity of inserting at the head of a linked list?'],
+                ['short', 4, 'Differentiate between a stack and a queue.'],
+                ['short', 4, 'What is a circular linked list and where is it used?'],
+                ['short', 4, 'Explain how a doubly linked list differs from a singly linked list.'],
+                ['long', 10, 'Compare arrays and linked lists in terms of memory layout and access time.'],
+                ['long', 10, 'Explain how a dynamic array grows and analyse its amortised insertion cost.'],
+                ['long', 10, 'Describe how to detect and remove a cycle in a singly linked list.'],
+                ['mcq', 2, 'Which structure uses LIFO ordering? (a) Queue (b) Stack (c) Tree (d) Graph'],
             ],
             'Trees' => [
-                ['short', 4, 'easy', 'Define a binary search tree.'],
-                ['short', 4, 'medium', 'What is the difference between a complete and a full binary tree?'],
-                ['short', 4, 'easy', 'What is the height of a binary tree with a single node?'],
-                ['short', 4, 'medium', 'Define an in-order traversal and give its output for a small BST.'],
-                ['long', 10, 'medium', 'Explain AVL tree rotations with examples.'],
-                ['long', 10, 'hard', 'Describe red-black tree insertion and the re-colouring cases.'],
-                ['long', 10, 'medium', 'Explain B-tree insertion and how node splitting maintains balance.'],
-                ['long', 5, 'medium', 'Describe how a min-heap supports a priority queue.'],
-                ['mcq', 2, 'medium', 'A balanced BST with n nodes has height of order? (a) n (b) log n (c) n^2 (d) 1'],
+                ['short', 4, 'Define a binary search tree.'],
+                ['short', 4, 'What is the difference between a complete and a full binary tree?'],
+                ['short', 4, 'What is the height of a binary tree with a single node?'],
+                ['short', 4, 'Define an in-order traversal and give its output for a small BST.'],
+                ['long', 10, 'Explain AVL tree rotations with examples.'],
+                ['long', 10, 'Describe red-black tree insertion and the re-colouring cases.'],
+                ['long', 10, 'Explain B-tree insertion and how node splitting maintains balance.'],
+                ['long', 5, 'Describe how a min-heap supports a priority queue.'],
+                ['mcq', 2, 'A balanced BST with n nodes has height of order? (a) n (b) log n (c) n^2 (d) 1'],
             ],
             'Graphs' => [
-                ['short', 5, 'medium', 'State the difference between BFS and DFS.'],
-                ['short', 4, 'easy', 'How is a graph represented using an adjacency list?'],
-                ['short', 4, 'easy', 'How does an adjacency matrix represent a graph?'],
-                ['short', 4, 'medium', 'What is a strongly connected component in a directed graph?'],
-                ['short', 4, 'medium', 'Define a minimum spanning tree and give one application.'],
-                ['long', 10, 'hard', "Explain Dijkstra's shortest path algorithm with a worked example."],
-                ['long', 10, 'medium', 'Explain topological sorting with a worked example on a DAG.'],
-                ['long', 10, 'medium', "Explain Kruskal's algorithm for a minimum spanning tree with an example."],
+                ['short', 5, 'State the difference between BFS and DFS.'],
+                ['short', 4, 'How is a graph represented using an adjacency list?'],
+                ['short', 4, 'How does an adjacency matrix represent a graph?'],
+                ['short', 4, 'What is a strongly connected component in a directed graph?'],
+                ['short', 4, 'Define a minimum spanning tree and give one application.'],
+                ['long', 10, "Explain Dijkstra's shortest path algorithm with a worked example."],
+                ['long', 10, 'Explain topological sorting with a worked example on a DAG.'],
+                ['long', 10, "Explain Kruskal's algorithm for a minimum spanning tree with an example."],
             ],
             'Hashing' => [
-                ['short', 5, 'easy', 'Describe open addressing for collision resolution.'],
-                ['mcq', 2, 'easy', 'A good hash function should minimise? (a) memory (b) collisions (c) keys (d) buckets'],
-                ['long', 10, 'medium', 'Discuss separate chaining versus open addressing.'],
+                ['short', 5, 'Describe open addressing for collision resolution.'],
+                ['mcq', 2, 'A good hash function should minimise? (a) memory (b) collisions (c) keys (d) buckets'],
+                ['long', 10, 'Discuss separate chaining versus open addressing.'],
             ],
             'Advanced Structures' => [
-                ['short', 4, 'medium', 'What is a trie used for?'],
-                ['long', 10, 'hard', 'Explain the union-find data structure with path compression.'],
+                ['short', 4, 'What is a trie used for?'],
+                ['long', 10, 'Explain the union-find data structure with path compression.'],
             ],
         ]);
 
         $cs303 = $this->seedSubject('CS303', 'Database Management', [
             'Introduction' => [
-                ['short', 5, 'easy', 'What is a DBMS? List its advantages over file systems.'],
-                ['mcq', 2, 'easy', 'Which is NOT a DBMS? (a) MySQL (b) PostgreSQL (c) Excel (d) Oracle'],
+                ['short', 5, 'What is a DBMS? List its advantages over file systems.'],
+                ['mcq', 2, 'Which is NOT a DBMS? (a) MySQL (b) PostgreSQL (c) Excel (d) Oracle'],
             ],
             'Relational Model & SQL' => [
-                ['short', 6, 'medium', 'Write SQL to find the second-highest salary from an Employee table.'],
-                ['long', 10, 'medium', 'Explain ER diagrams with a university example.'],
-                ['short', 4, 'easy', 'Define primary key and foreign key.'],
-                ['mcq', 2, 'medium', 'Which SQL clause filters grouped rows? (a) WHERE (b) HAVING (c) ORDER BY (d) LIMIT'],
+                ['short', 6, 'Write SQL to find the second-highest salary from an Employee table.'],
+                ['long', 10, 'Explain ER diagrams with a university example.'],
+                ['short', 4, 'Define primary key and foreign key.'],
+                ['mcq', 2, 'Which SQL clause filters grouped rows? (a) WHERE (b) HAVING (c) ORDER BY (d) LIMIT'],
             ],
             'Normalization' => [
-                ['long', 8, 'medium', 'Define BCNF and explain it with an example.'],
-                ['short', 5, 'medium', 'What is a functional dependency?'],
+                ['long', 8, 'Define BCNF and explain it with an example.'],
+                ['short', 5, 'What is a functional dependency?'],
             ],
             'Transactions' => [
-                ['short', 5, 'easy', 'List the ACID properties.'],
-                ['long', 10, 'hard', 'Explain two-phase locking and how it prevents anomalies.'],
+                ['short', 5, 'List the ACID properties.'],
+                ['long', 10, 'Explain two-phase locking and how it prevents anomalies.'],
             ],
             'Indexing' => [
-                ['short', 4, 'medium', 'Why are B+ trees preferred for database indexes?'],
-                ['mcq', 2, 'easy', 'An index primarily improves? (a) inserts (b) reads (c) storage (d) backups'],
+                ['short', 4, 'Why are B+ trees preferred for database indexes?'],
+                ['mcq', 2, 'An index primarily improves? (a) inserts (b) reads (c) storage (d) backups'],
             ],
         ]);
 
@@ -91,7 +91,7 @@ class QForgeDemoSeeder extends Seeder
     }
 
     /**
-     * @param  array<string, array<int, array{0:string,1:int,2:string,3:string}>>  $units
+     * @param  array<string, array<int, array{0:string,1:int,2:string}>>  $units
      */
     private function seedSubject(string $code, string $name, array $units): Subject
     {
@@ -117,13 +117,12 @@ class QForgeDemoSeeder extends Seeder
                 'position' => $position++,
             ]);
 
-            foreach ($questions as [$type, $marks, $difficulty, $text]) {
+            foreach ($questions as [$type, $marks, $text]) {
                 Question::create([
                     'subject_id' => $subject->id,
                     'unit_id' => $unit->id,
                     'type' => $type,
                     'marks' => $marks,
-                    'difficulty' => $difficulty,
                     'text' => $text,
                     'source' => 'manual',
                     'status' => 'approved',
