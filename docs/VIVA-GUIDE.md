@@ -482,7 +482,7 @@ reason instead of blindly retrying a file that will never parse.
 
 ## 5.5. Syllabus → Subject extraction & import (the other pipeline)
 
-There are two document pipelines. §2/§3 cover *past-paper* extraction (PDF → candidate questions → review queue). This section covers the *syllabus* pipeline (PDF → a subject's units), because an examiner may ask "how do you turn a syllabus PDF into units?" and it has different mechanics.
+There are two document pipelines: *past-paper* extraction (PDF → candidate questions → review queue, detailed in §5.6) and the *syllabus* pipeline covered here (PDF → a subject's units), because an examiner may ask "how do you turn a syllabus PDF into units?" and it has different mechanics.
 
 ### The flow
 
@@ -562,6 +562,84 @@ the CSIT fixtures act as a regression fence so the BIM work can't break the orig
 **One-line defense:** *"Python parses the PDF into a proposed course + units; Laravel stores nothing
 until the admin confirms on a review screen where every field is editable; and importing into an
 existing subject only ever adds missing units, so it's safe to re-run."*
+
+---
+
+## 5.6. Past paper → question extraction (how questions, units, and marks are auto-detected)
+
+The past-paper pipeline: upload (`type=past_paper`) → `ProcessDocumentUpload` job →
+`PythonService::extract` → [`pdf.py::extract_pages`](../python-service/app/services/pdf.py) →
+[`parser.py::parse_pages`](../python-service/app/services/parser.py) → candidates back to Laravel →
+[`CandidateImporter`](../code/app/Services/Extraction/CandidateImporter.php) stores them as
+`questions` rows with `source=extracted`, `status=pending`. Nothing reaches the generator until an
+admin approves it in the review queue.
+
+### Page text (with per-page OCR fallback)
+
+`extract_pages` reads each page's text layer with **pdfplumber**; if a page yields fewer characters
+than a threshold it falls back to **Tesseract OCR** *for that page only* — real TU papers are
+routinely mixed (a digital cover sheet in front of photocopied question pages). Every candidate
+records which page it came from and whether OCR was used (`page`, `ocr` provenance).
+
+### How questions are detected (splitting)
+
+The parser is a deliberately **conservative heuristic splitter** — better to hand the reviewer one
+over-long block than to shred one question into five. Line by line:
+- A **top-level number** starts a question: `1.`, `1)`, `Q3.`, `Q. 4`. Lettered parts (`(a)`, `b)`)
+  are *never* starts — they're sub-parts or MCQ options and stay with their question.
+- **Letterhead/rubric noise** is dropped (university names, "Full Marks:", "Time:", "Candidates are
+  required…", page numbers) — these repeat on every page of a multi-paper file, so they must not be
+  swallowed into whichever question is open when the page turns.
+- Text before the first numbered question is preamble — dropped.
+
+### How the unit/section hint is detected
+
+A line that is *only* a heading — `Unit 3`, `Unit-III`, `Group B`, `Section A` — becomes the
+`unit_hint` carried by every following question (across page breaks) until the next heading. Laravel's
+`UnitResolver` later matches that free-text hint against the subject's real units; a "Section A" hint
+that matches no unit simply leaves the question **unlinked for the admin to assign** — deliberate,
+not a failure.
+
+### How marks are auto-detected (four signals, in priority order)
+
+1. **Bracketed expressions on the question**: `[5]`, `[2+8]`, `[2.5+2.5]`, `[2 x 2.5=5]` — the
+   bracket contents are evaluated as a tiny arithmetic expression (sum / product / trust the printed
+   `=total`), because TU papers print compound forms for split questions. Non-arithmetic brackets
+   (`[Fig. 2]`, `[i]`) are rejected. Multiple tokens in one block (`a) … [5] b) … [5]`) are summed.
+2. **The word itself**: `(10 marks)`, `12 Marks`. A bare `(5)` mid-text is *not* trusted — it's too
+   often a list marker or citation.
+3. **A wordless paren at the very end of the question** — the TU 2079 CSC410 style `… algorithm. (2+8)`:
+   accepted when it contains an operator; a bare trailing `(5)` only when it **agrees with the section
+   directive** (signal 4). Accepted tokens are stripped from the stored question text.
+4. **The section directive** — the decisive one for papers that print marks nowhere else (the whole
+   MGT411 set): `Attempt any TEN questions. [10 × 5 = 50]` sets a **per-question default of 5** for
+   every following question without printed marks. The printed total must agree with `count × per`
+   (a mismatch means OCR mangled a digit → rejected). The default **resets on every new
+   Section/Group/Unit heading** — if a section's own directive is lost to OCR, its questions get
+   `marks=null` rather than inheriting the previous section's value (*prefer missing over wrong*).
+   A question's own printed marks always beat the default.
+
+**OCR digit folding:** inside a marks token only, `I/l/| → 1` and `o → 0`, and only when the token
+already contains a real digit — so the scanned `[I + 4]` (2078 paper) reads as 5, while a
+roman-numeral citation `[ii]` stays rejected.
+
+**Type classification** then uses the resolved marks: ≥3 option lines → `mcq`; marks ≥ 8 or an essay
+verb (explain/discuss/derive/…) → `long`; otherwise `short`. So detecting the directive also fixes
+classification — a 10-mark MGT question is `long`, not `short`.
+
+### Where it lands (Laravel side)
+
+`CandidateImporter` **dedups by normalized text fingerprint** (papers repeat across years;
+re-importing the same PDF must not double the bank), resolves the unit hint, and stores everything as
+`pending` with `marks`/`unit_id` **nullable** (see §4's migration note). Approval requires both to be
+filled — the generator only ever sees `approved` rows, so a wrong parser guess costs the admin a
+click, never data integrity.
+
+**One-line defense:** *"Extraction is a conservative heuristic: split on top-level numbering, carry
+section headings as unit hints, and read marks from four printed signals — per-question brackets,
+the word 'marks', trailing parens, and the section directive '[10 × 5 = 50]' — with explicit marks
+always beating the inferred default. Everything lands as pending; the admin review queue is the
+safety net, so a wrong guess costs a click, not data."*
 
 ---
 
@@ -778,7 +856,7 @@ Routes are behind `auth:sanctum` + `role:teacher`. Controllers add an ownership 
 `BankExpansionController` bakes the owner id into the batch **name** and re-checks it in `jobStatus`,
 so no extra table is needed to authorize the poll.
 
-### Database (3)
+### Database & extraction (4)
 
 **Q14. Why is repetition derived from `paper_questions` and not from `used_count`?**
 `paper_questions` is a precise per-paper snapshot — it records *which* questions were on *which*
@@ -794,6 +872,17 @@ selects `approved` rows, so a null never reaches the algorithm.
 Added in M3.1. `generated` = a paper QForge produced; `imported` = a real historical exam recorded so
 its questions feed repetition control subject-wide. History and analytics filter to
 `origin=generated`, but the last-N exclusion window includes imported papers.
+
+**Q16b. How does the extractor auto-detect marks (and units) on a past paper?**
+Marks come from four printed signals, priority-ordered (§5.6): bracketed arithmetic on the question
+(`[2+8]` → 10), the word "marks", a wordless trailing paren (`(2+8)`; a bare `(5)` only when it
+agrees with the section directive), and the **section directive** `Attempt any TEN questions
+[10 × 5 = 50]` → a per-question default of 5 for questions with no printed marks — reset on every new
+section heading, and always beaten by explicit marks. OCR digit confusion (`[I + 4]`) is folded only
+inside marks tokens that already contain a digit. Units: a standalone `Unit 3` / `Section A` /
+`Group B` heading becomes a free-text `unit_hint`; Laravel resolves it against real units and leaves
+unresolvable ones unlinked for the admin. Everything lands `pending` — the review queue absorbs any
+wrong guess.
 
 ### AI / Python (3)
 
@@ -860,6 +949,7 @@ queue).
 | 13 | What AI decides / doesn't | Decides: question *text*. Doesn't: type, marks, unit, selection, or DB writes |
 | 14 | Queue stack | Redis + Horizon; jobs `ProcessDocumentUpload`, `ExpandQuestionBank` |
 | 15 | Milestone status | M1–M5 (incl. M3.1, M4.1) all **Done**; 112+ Laravel tests, 97 pytest green per the milestone log |
+| 16 | Past-paper marks signals (priority) | Brackets `[2+8]` → word "marks" → trailing paren `(2+8)` → section directive `[10×5=50]` per-question default (explicit wins; default resets each section; OCR `I→1` fold inside tokens) |
 
 ---
 
