@@ -80,6 +80,8 @@ export interface Candidate {
   subjectCode: string;
   unitId: number | null;
   unitName: string | null;
+  /** Every unit the question is tagged with (primary included). */
+  unitIds: number[];
   source: string;
   unitHint: string | null;
   page: number | null;
@@ -144,6 +146,7 @@ interface ApiCandidate {
   subject_code?: string;
   unit_id: number | null;
   unit_name?: string;
+  unit_ids?: number[];
   source: string;
   attributes: Record<string, unknown> | null;
 }
@@ -196,6 +199,7 @@ const mapCandidate = (q: ApiCandidate): Candidate => {
     subjectCode: q.subject_code ?? '',
     unitId: q.unit_id,
     unitName: q.unit_name ?? null,
+    unitIds: q.unit_ids ?? (q.unit_id != null ? [q.unit_id] : []),
     source: q.source,
     unitHint: (attrs.unit_hint as string) ?? null,
     page: (attrs.page as number) ?? null,
@@ -367,13 +371,25 @@ export const useExtractionStore = defineStore('extraction', () => {
    */
   async function approve(
     id: number,
-    patch: { unitId?: number | null; marks?: number | null; type?: string; text?: string } = {},
+    patch: {
+      unitId?: number | null;
+      marks?: number | null;
+      type?: string;
+      text?: string;
+      /** Extra units the question also covers (primary excluded). */
+      additionalUnitIds?: number[];
+    } = {},
   ) {
     const body: Record<string, unknown> = {};
     if (patch.unitId != null) body.unit_id = patch.unitId;
     if (patch.marks != null) body.marks = patch.marks;
     if (patch.type) body.type = toApiType(patch.type);
     if (patch.text) body.text = patch.text;
+
+    // unit_ids is the FULL set and must contain the primary unit.
+    const primary = patch.unitId ?? candidates.value.find((c) => c.id === id)?.unitId;
+    const extras = (patch.additionalUnitIds ?? []).filter((u) => u !== primary);
+    if (extras.length && primary != null) body.unit_ids = [primary, ...extras];
 
     const { data } = await api.post(`/questions/${id}/approve`, body);
     replace(mapCandidate(data.data as ApiCandidate));
@@ -390,7 +406,16 @@ export const useExtractionStore = defineStore('extraction', () => {
    * validates them as integers whenever they are present, and a candidate is
    * allowed to stay unlinked until someone approves it.
    */
-  async function save(id: number, patch: { unitId?: number | null; marks?: number | null; type?: string; text?: string }) {
+  async function save(
+    id: number,
+    patch: {
+      unitId?: number | null;
+      marks?: number | null;
+      type?: string;
+      text?: string;
+      additionalUnitIds?: number[];
+    },
+  ) {
     const candidate = candidates.value.find((c) => c.id === id);
     if (!candidate) return;
 
@@ -401,6 +426,10 @@ export const useExtractionStore = defineStore('extraction', () => {
     if (marks != null) body.marks = marks;
     body.type = toApiType(patch.type ?? candidate.type);
     body.text = patch.text ?? candidate.text;
+
+    // Full multi-unit set (primary first); only meaningful once a unit is set.
+    const extras = (patch.additionalUnitIds ?? []).filter((u) => u !== unitId);
+    if (extras.length && unitId != null) body.unit_ids = [unitId, ...extras];
 
     const { data } = await api.put(`/questions/${id}`, body);
     replace(mapCandidate(data.data as ApiCandidate));

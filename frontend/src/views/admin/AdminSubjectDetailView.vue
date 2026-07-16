@@ -57,12 +57,36 @@ const totalQuestions = computed(() =>
   subject.value ? subject.value.units.flatMap((u) => u.questions).length : 0,
 );
 
-const filteredQuestions = computed(() => {
-  if (!subject.value) return [] as (CatalogQuestion & { unitName: string })[];
-  return subject.value.units
-    .filter((u) => unitFilter.value === 'all' || u.id === unitFilter.value)
-    .flatMap((u) => u.questions.map((q) => ({ ...q, unitName: u.name })));
+// Each question is listed once, under its primary unit; `extraUnits` powers the
+// "+ Unit" chips for multi-unit questions.
+type ListedQuestion = CatalogQuestion & {
+  unitName: string;
+  primaryUnitId: number;
+  extraUnits: { id: number; name: string }[];
+};
+
+const allQuestions = computed<ListedQuestion[]>(() => {
+  if (!subject.value) return [];
+  return subject.value.units.flatMap((u) =>
+    u.questions.map((q) => ({
+      ...q,
+      unitName: u.name,
+      primaryUnitId: u.id,
+      extraUnits: q.units.filter((tag) => tag.id !== u.id),
+    })),
+  );
 });
+
+// The unit filter matches ANY tagged unit (mirrors the generator's rule), so a
+// multi-unit question surfaces when filtering by its secondary unit too.
+const filteredQuestions = computed(() =>
+  allQuestions.value.filter(
+    (q) =>
+      unitFilter.value === 'all' ||
+      q.primaryUnitId === unitFilter.value ||
+      q.unitIds.includes(unitFilter.value as number),
+  ),
+);
 
 const unitOptions = computed(() => {
   if (!subject.value) return [{ value: 'all', label: 'All Units' }];
@@ -113,6 +137,7 @@ const questionModal = reactive({
   open: false,
   mode: 'type' as QuestionMode,
   unitId: 0,
+  additionalUnitIds: [] as number[],
   text: '',
   marks: 5,
   type: 'Short Answer',
@@ -123,10 +148,23 @@ const openAddQuestion = (unitId: number | null = null) => {
   questionModal.open = true;
   questionModal.mode = 'type';
   questionModal.unitId = unitId ?? subject.value?.units[0]?.id ?? 0;
+  questionModal.additionalUnitIds = [];
   questionModal.text = '';
   questionModal.marks = 5;
   questionModal.type = 'Short Answer';
   questionModal.difficulty = 'Medium';
+};
+
+// A question can also cover units beyond its primary one.
+const otherUnitOptions = computed(
+  () => subject.value?.units.filter((u) => u.id !== questionModal.unitId) ?? [],
+);
+
+const toggleAdditionalUnit = (unitId: number) => {
+  const list = questionModal.additionalUnitIds;
+  const idx = list.indexOf(unitId);
+  if (idx === -1) list.push(unitId);
+  else list.splice(idx, 1);
 };
 
 const saveQuestion = async () => {
@@ -134,6 +172,7 @@ const saveQuestion = async () => {
   await catalog.createQuestion(code.value, {
     subjectId: subject.value.id,
     unitId: questionModal.unitId,
+    additionalUnitIds: questionModal.additionalUnitIds,
     text: questionModal.text.trim(),
     marks: questionModal.marks,
     type: questionModal.type,
@@ -389,7 +428,15 @@ const diffColor: Record<string, string> = {
                     "
                   >{{ q.text }}</div>
                 </td>
-                <td style="color: var(--text2); font-size: 12.5px">{{ q.unitName }}</td>
+                <td style="color: var(--text2); font-size: 12.5px">
+                  {{ q.unitName }}
+                  <QFBadge
+                    v-for="extra in q.extraUnits"
+                    :key="extra.id"
+                    variant="neutral"
+                    style="margin-left: 4px"
+                  >+ {{ extra.name }}</QFBadge>
+                </td>
                 <td><QFBadge variant="neutral">{{ q.type }}</QFBadge></td>
                 <td style="font-family: var(--font-mono); font-size: 13px; font-weight: 600">{{ q.marks }}</td>
                 <td>
@@ -406,7 +453,7 @@ const diffColor: Record<string, string> = {
                   <QFButton
                     variant="ghost"
                     size="sm"
-                    @click="deleteQuestion(subject.units.find((u) => u.name === q.unitName)!.id, q.id)"
+                    @click="deleteQuestion(q.primaryUnitId, q.id)"
                   >✕</QFButton>
                 </td>
               </tr>
@@ -579,6 +626,25 @@ const diffColor: Record<string, string> = {
             label="Unit"
             :options="subject.units.map((u) => ({ value: u.id, label: u.name }))"
           />
+          <div v-if="otherUnitOptions.length > 0">
+            <div style="font-size: 12.5px; color: var(--text3); margin-bottom: 6px">
+              Also covers (optional)
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px">
+              <label
+                v-for="u in otherUnitOptions"
+                :key="u.id"
+                style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer"
+              >
+                <input
+                  type="checkbox"
+                  :checked="questionModal.additionalUnitIds.includes(u.id)"
+                  @change="toggleAdditionalUnit(u.id)"
+                />
+                {{ u.name }}
+              </label>
+            </div>
+          </div>
           <QFInput
             v-model="questionModal.text"
             label="Question text *"

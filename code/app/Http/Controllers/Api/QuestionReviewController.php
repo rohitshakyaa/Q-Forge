@@ -26,21 +26,28 @@ class QuestionReviewController extends Controller
     {
         $data = $request->validate([
             'unit_id' => ['nullable', 'integer', 'exists:units,id'],
+            'unit_ids' => ['nullable', 'array', 'min:1'],
+            'unit_ids.*' => ['integer', 'exists:units,id'],
             'marks' => ['nullable', 'integer', 'min:1', 'max:100'],
             'type' => ['nullable', Rule::in(['short', 'long', 'mcq'])],
             'difficulty' => ['nullable', Rule::in(['easy', 'medium', 'hard'])],
             'text' => ['nullable', 'string'],
         ]);
 
+        $unitIds = $data['unit_ids'] ?? null;
+        unset($data['unit_ids']);
+
         $question->fill(array_filter($data, fn ($value) => $value !== null));
 
         $this->assertUnitBelongsToSubject($question);
+        $this->assertUnitSetIsCoherent($question, $unitIds);
         $this->assertReadyForApproval($question);
 
         $question->status = 'approved';
         $question->save();
+        $question->syncUnitLinks($unitIds);
 
-        return new QuestionResource($question->load(['subject', 'unit']));
+        return new QuestionResource($question->load(['subject', 'unit', 'units']));
     }
 
     public function reject(Question $question): QuestionResource
@@ -115,6 +122,36 @@ class QuestionReviewController extends Controller
         if (! $belongs) {
             throw ValidationException::withMessages([
                 'unit_id' => 'The unit must belong to the question\'s subject.',
+            ]);
+        }
+    }
+
+    /**
+     * A multi-unit set must include the primary unit and stay within the
+     * question's subject.
+     *
+     * @param  int[]|null  $unitIds
+     */
+    private function assertUnitSetIsCoherent(Question $question, ?array $unitIds): void
+    {
+        if ($unitIds === null) {
+            return;
+        }
+
+        if ($question->unit_id !== null
+            && ! in_array((int) $question->unit_id, array_map('intval', $unitIds), true)) {
+            throw ValidationException::withMessages([
+                'unit_ids' => 'The unit set must include the primary unit.',
+            ]);
+        }
+
+        $within = Unit::whereIn('id', $unitIds)
+            ->where('subject_id', $question->subject_id)
+            ->count();
+
+        if ($within !== count(array_unique($unitIds))) {
+            throw ValidationException::withMessages([
+                'unit_ids' => 'Every unit must belong to the question\'s subject.',
             ]);
         }
     }

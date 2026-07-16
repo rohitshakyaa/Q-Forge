@@ -128,7 +128,7 @@ class QForgeDemoSeeder extends Seeder
                     'source' => 'manual',
                     'status' => 'approved',
                     'used_count' => 0,
-                ]);
+                ])->syncUnitLinks();
             }
         }
 

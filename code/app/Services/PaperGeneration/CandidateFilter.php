@@ -30,13 +30,18 @@ class CandidateFilter
         ?callable $lastNExclusion = null,
     ): Collection {
         $query = Question::query()
+            // Coverage checks downstream read the multi-unit tags; eager-load
+            // them here so validator/backtracker passes don't N+1.
+            ->with('units')
             ->where('subject_id', $blueprint->subjectId)
             ->where('status', 'approved')
             ->where('type', $slot->type)
             ->where('marks', $slot->marks);
 
         if (! empty($blueprint->allowedUnitIds)) {
-            $query->whereIn('unit_id', $blueprint->allowedUnitIds);
+            // Any-overlap rule: a multi-unit question qualifies when at least
+            // one of its tagged units is allowed by the blueprint.
+            $query->whereHas('units', fn ($q) => $q->whereIn('units.id', $blueprint->allowedUnitIds));
         }
 
         if (! empty($excludedQuestionIds)) {

@@ -19,6 +19,12 @@ class QuestionResource extends JsonResource
             'unit_id' => $this->unit_id,
             'subject_code' => $this->whenLoaded('subject', fn () => $this->subject->code),
             'unit_name' => $this->whenLoaded('unit', fn () => $this->unit->name),
+            // Full multi-unit set (primary included) from the question_unit pivot.
+            'unit_ids' => $this->whenLoaded('units', fn () => $this->units->pluck('id')->sort()->values()),
+            'units' => $this->whenLoaded('units', fn () => $this->units
+                ->sortBy('id')
+                ->values()
+                ->map(fn ($unit) => ['id' => $unit->id, 'name' => $unit->name])),
             'type' => $this->type,
             'marks' => $this->marks,
             'difficulty' => $this->difficulty,

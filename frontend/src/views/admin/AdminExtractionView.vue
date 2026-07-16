@@ -30,7 +30,9 @@ const actionError = ref<string | null>(null);
 const skippedNotice = ref<string | null>(null);
 
 /** Per-candidate edit buffers, keyed by id. Absent means "not editing". */
-const drafts = reactive<Record<number, { text: string; marks: string; type: string; unitId: string }>>({});
+const drafts = reactive<
+  Record<number, { text: string; marks: string; type: string; unitId: string; additionalUnitIds: number[] }>
+>({});
 
 const subjectOptions = computed(() => catalog.subjects.map((s) => ({ value: s.code, label: s.code })));
 const unitOptions = computed(() => [
@@ -82,7 +84,19 @@ const beginEdit = (c: Candidate) => {
     marks: c.marks === null ? '' : String(c.marks),
     type: c.type,
     unitId: c.unitId === null ? '' : String(c.unitId),
+    additionalUnitIds: c.unitIds.filter((u) => u !== c.unitId),
   };
+};
+
+/** Units offered as "also covers": everything except the draft's primary. */
+const otherUnits = (id: number) =>
+  extraction.units.filter((u) => String(u.id) !== drafts[id].unitId);
+
+const toggleAdditionalUnit = (id: number, unitId: number) => {
+  const list = drafts[id].additionalUnitIds;
+  const idx = list.indexOf(unitId);
+  if (idx === -1) list.push(unitId);
+  else list.splice(idx, 1);
 };
 
 const cancelEdit = (id: number) => {
@@ -97,6 +111,7 @@ const draftPatch = (id: number) => {
     type: draft.type,
     marks: draft.marks === '' ? null : Number(draft.marks),
     unitId: draft.unitId === '' ? null : Number(draft.unitId),
+    additionalUnitIds: draft.additionalUnitIds,
   };
 };
 
@@ -308,6 +323,25 @@ watch([filter, selectedSubject], load);
                 />
                 <QFSelect v-model="drafts[c.id].type" label="Type" :options="QUESTION_TYPES" />
               </div>
+              <div v-if="drafts[c.id].unitId !== '' && otherUnits(c.id).length > 0">
+                <div style="font-size: 12px; color: var(--text3); margin-bottom: 6px">
+                  Also covers (optional)
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px">
+                  <label
+                    v-for="u in otherUnits(c.id)"
+                    :key="u.id"
+                    style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="drafts[c.id].additionalUnitIds.includes(u.id)"
+                      @change="toggleAdditionalUnit(c.id, u.id)"
+                    />
+                    {{ u.name }}
+                  </label>
+                </div>
+              </div>
               <div style="display: flex; gap: 8px; justify-content: flex-end">
                 <QFButton variant="secondary" size="sm" @click="cancelEdit(c.id)">Cancel</QFButton>
                 <QFButton variant="secondary" size="sm" @click="saveEdit(c.id)">Save changes</QFButton>
@@ -388,6 +422,25 @@ watch([filter, selectedSubject], load);
                   @update:model-value="(v) => (drafts[c.id].marks = String(v))"
                 />
                 <QFSelect v-model="drafts[c.id].type" label="Type" :options="QUESTION_TYPES" />
+              </div>
+              <div v-if="drafts[c.id].unitId !== '' && otherUnits(c.id).length > 0">
+                <div style="font-size: 12px; color: var(--text3); margin-bottom: 6px">
+                  Also covers (optional)
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px">
+                  <label
+                    v-for="u in otherUnits(c.id)"
+                    :key="u.id"
+                    style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="drafts[c.id].additionalUnitIds.includes(u.id)"
+                      @change="toggleAdditionalUnit(c.id, u.id)"
+                    />
+                    {{ u.name }}
+                  </label>
+                </div>
               </div>
               <div style="display: flex; gap: 8px; justify-content: flex-end">
                 <QFButton variant="secondary" size="sm" @click="cancelEdit(c.id)">Cancel</QFButton>

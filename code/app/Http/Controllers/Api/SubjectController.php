@@ -29,7 +29,8 @@ class SubjectController extends Controller
      */
     public function show(Subject $subject): SubjectResource
     {
-        $subject->load(['units.questions' => fn ($q) => $q->orderBy('id')]);
+        // `units` on each question powers the multi-unit chips in the bank UI.
+        $subject->load(['units.questions' => fn ($q) => $q->orderBy('id')->with('units')]);
 
         return new SubjectResource($subject);
     }

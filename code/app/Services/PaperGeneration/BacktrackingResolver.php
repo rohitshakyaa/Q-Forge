@@ -68,8 +68,10 @@ class BacktrackingResolver
         $ordered = $pool
             ->reject(fn (Question $q) => in_array($q->id, $usedIds, true))
             ->sort(function (Question $a, Question $b) use ($uncovered) {
-                $aRank = in_array($a->unit_id, $uncovered, true) ? 0 : 1;
-                $bRank = in_array($b->unit_id, $uncovered, true) ? 0 : 1;
+                // A multi-unit question ranks uncovered-first when ANY of its
+                // tagged units is still uncovered.
+                $aRank = array_intersect($a->taggedUnitIds(), $uncovered) !== [] ? 0 : 1;
+                $bRank = array_intersect($b->taggedUnitIds(), $uncovered) !== [] ? 0 : 1;
 
                 return [$aRank, $a->used_count, $a->id] <=> [$bRank, $b->used_count, $b->id];
             })
@@ -115,7 +117,10 @@ class BacktrackingResolver
     {
         $ids = [];
         foreach ($assigned as $question) {
-            $ids[$question->unit_id] = true;
+            // Union semantics: a multi-unit question covers every tagged unit.
+            foreach ($question->taggedUnitIds() as $unitId) {
+                $ids[$unitId] = true;
+            }
         }
 
         return array_keys($ids);

@@ -39,6 +39,7 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 | M4 — PDF pipeline | Done | Python `POST /extract` (pdfplumber + per-page Tesseract OCR fallback + heuristic parser) in `python-service/app/`; `document_uploads` + `ProcessDocumentUpload` on Redis/Horizon; `POST/GET/DELETE /uploads`; review queue (`approve`/`reject` + bulk) gated so a candidate missing a unit or marks cannot be approved. `questions.unit_id`/`marks` now nullable. 89 Laravel tests (+43) and 51 pytest tests green. Upload + Review Queue screens wired to the live API. |
 | M4.1 — Syllabus import | Done | Python `services/syllabus.py` parses a syllabus into courses + units (`number`, `name`, `hours`, markdown `content`) and returns them as `courses[]` from `/extract`; staged in `document_uploads.meta.courses`; admin confirms at `/admin/syllabus/:uploadId`; transactional `POST /uploads/{id}/import` → `SyllabusImporter`. New `units.hours` + `units.content`; `subjects.syllabus` now holds the course as markdown (M5's corpus). Import is additive and idempotent — it never deletes a unit, because `questions.unit_id` cascades. 112 Laravel tests (+23) and 97 pytest (+30) green. See [`adr/0002-syllabus-import.md`](adr/0002-syllabus-import.md). |
 | M5 — AI bank expansion | Done | `qforge_ollama` (Ollama, `qwen2.5:3b-instruct`, auto-pull entrypoint) on `local`; Python `POST /generate-questions` + `LLMProvider` (`OllamaProvider` default + `StubProvider`, env-selected). Laravel **`POST /blueprints/{id}/expand-bank`** (owner-scoped; re-derives `missing_slots` server-side) → `Bus::batch(ExpandQuestionBank)` → `{ jobId }`; poll `GET /jobs/{batchId}`. Job grounds each slot (`units.content`/`subjects.syllabus` + ≤3 approved exemplars), calls Python for `need+2`, stamps `type`/`marks` from the slot, resolves `unit_id`, stores `source=ai, status=approved`. `MissingSlot` enriched with server-set `unitId` (UnitResolver not used — it parses "Unit N" headings, not names). Tests green (stub provider). Generate screen "Expand bank with AI" wired. |
+| Post-M5 — Multi-unit questions | Done | New `question_unit` pivot (backfilled): `questions.unit_id` stays the **primary** unit and always appears in the pivot. Generator filters on **any-overlap** with allowed units; one multi-unit question covers every allowed unit it is tagged with (validator/backtracker/missing-slot union semantics); soft allocations stay primary-only. Paper snapshot picks the primary when allowed, else the lowest-id allowed tag. API: optional `unit_ids` (full set, must contain the primary, same subject) on create/update/approve; `QuestionResource` exposes `unit_ids` + `units`. Tags are human-assigned only — parser keeps its single `unit_hint`, AI expansion stays single-unit (zero Python changes). Bank UI lists each question once under its primary with "+ Unit" chips; unit filters match any tag; review/create forms gain "Also covers". 152 Laravel tests green (+11, `MultiUnitQuestionTest`). ER: [`diagrams/m5-schema.mmd`](diagrams/m5-schema.mmd). |
 
 ---
 
@@ -730,6 +731,37 @@ AI-sourced questions marked in the paper.
   blueprint becomes satisfiable on re-`generate`; another owner's blueprint → 403.
 - End-to-end with `qforge_ollama` up: infeasible → "Expand bank with AI" → job runs in `/horizon` →
   regenerate succeeds, AI-sourced questions marked in the paper.
+
+---
+
+## Post-M5 — Multi-unit questions
+
+**Status: Done.**
+
+A question may genuinely span several units ("compare X from Unit 2 with Y from Unit 3"). Filed
+under one unit, it was invisible to any blueprint that excluded that unit — even when the blueprint
+allowed another unit it covers.
+
+**New table:** `question_unit` (pivot, backfilled from `questions.unit_id`). `questions.unit_id`
+stays the **primary** unit — the one the question is listed under and counted against for soft
+`unitAllocations` — and always also appears in the pivot (a single-unit question has exactly one row).
+
+**Semantics** (see [`../PLAN.md`](../PLAN.md) data model for the full rules):
+- *Candidate filter:* any-overlap — one tagged unit in the allowed set qualifies the question.
+- *Unit coverage:* union — one multi-unit question covers every allowed unit it is tagged with
+  (`ConstraintValidator`, `BacktrackingResolver`, `PaperGenerator` missing-slot/top-up targeting).
+- *Paper snapshot:* `paper_questions.unit_id` = primary when allowed, else the lowest-id allowed
+  tag — a paper never labels a question with a unit the blueprint excluded.
+- *Tag source:* human-only (`unit_ids` on create/update/approve — full set, must contain the
+  primary, same subject). The Python parser keeps its single `unit_hint`; AI expansion stays
+  single-unit. **Zero Python-service changes.**
+
+**Displayable product:** the bank lists each question once under its primary unit with "+ Unit"
+chips; unit filters match any tag; the review queue and Add Question modal gain an "Also covers"
+multi-select; a Units 2+3 question is now selectable on a Unit-3-only blueprint and prints as Unit 3.
+
+Cumulative ER updated in place: [`diagrams/m5-schema.mmd`](diagrams/m5-schema.mmd). Verified by
+`MultiUnitQuestionTest` (11 feature tests; 152 Laravel tests green).
 
 ---
 

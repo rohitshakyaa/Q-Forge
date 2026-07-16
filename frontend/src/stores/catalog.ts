@@ -9,6 +9,9 @@ export interface CatalogQuestion {
   type: string;
   difficulty?: 'Easy' | 'Medium' | 'Hard';
   used?: number;
+  /** Every unit the question is tagged with (primary included). */
+  unitIds: number[];
+  units: { id: number; name: string }[];
 }
 
 export interface CatalogUnit {
@@ -85,6 +88,8 @@ interface ApiQuestion {
   used_count: number;
   subject_code?: string;
   unit_name?: string;
+  unit_ids?: number[];
+  units?: { id: number; name: string }[];
 }
 interface ApiUnit {
   id: number;
@@ -110,6 +115,8 @@ const mapQuestion = (q: ApiQuestion): CatalogQuestion => ({
   type: fromApiType(q.type),
   difficulty: fromApiDiff(q.difficulty),
   used: q.used_count,
+  unitIds: q.unit_ids ?? [],
+  units: q.units ?? [],
 });
 
 const mapUnit = (u: ApiUnit): CatalogUnit => ({
@@ -184,11 +191,23 @@ export const useCatalogStore = defineStore('catalog', () => {
 
   async function createQuestion(
     code: string,
-    payload: { subjectId: number; unitId: number; text: string; marks: number; type: string; difficulty?: string },
+    payload: {
+      subjectId: number;
+      unitId: number;
+      text: string;
+      marks: number;
+      type: string;
+      difficulty?: string;
+      /** Extra units the question also covers (primary excluded). */
+      additionalUnitIds?: number[];
+    },
   ) {
+    const extras = (payload.additionalUnitIds ?? []).filter((id) => id !== payload.unitId);
     await api.post('/questions', {
       subject_id: payload.subjectId,
       unit_id: payload.unitId,
+      // unit_ids is the FULL set and must contain the primary.
+      ...(extras.length ? { unit_ids: [payload.unitId, ...extras] } : {}),
       text: payload.text,
       marks: payload.marks,
       type: toApiType(payload.type),

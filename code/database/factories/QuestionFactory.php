@@ -32,6 +32,15 @@ class QuestionFactory extends Factory
         ];
     }
 
+    /**
+     * Uphold the model invariant: the primary unit is always linked in the
+     * question_unit pivot (tests may then attach extra units on top).
+     */
+    public function configure(): static
+    {
+        return $this->afterCreating(fn (Question $question) => $question->syncUnitLinks());
+    }
+
     public function pending(): static
     {
         return $this->state(fn () => ['status' => 'pending']);

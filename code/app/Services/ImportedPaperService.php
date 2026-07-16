@@ -49,6 +49,7 @@ class ImportedPaperService
                     'source' => 'extracted',
                     'status' => 'approved',
                 ]);
+                $question->syncUnitLinks();
                 $createdIds[] = $question->id;
             }
 

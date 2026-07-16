@@ -145,7 +145,7 @@ const applyCourse = () => {
   }));
 };
 
-const onCourseChange = (value: string) => {
+const onCourseChange = (value: string | number) => {
   selectedIndex.value = Number(value);
   applyCourse();
 };

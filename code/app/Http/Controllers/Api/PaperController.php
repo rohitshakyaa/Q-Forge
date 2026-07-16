@@ -90,7 +90,7 @@ class PaperController extends Controller
 
                 $paper->paperQuestions()->create([
                     'question_id' => $question->id,
-                    'unit_id' => $question->unit_id,
+                    'unit_id' => $this->snapshotUnitId($question, $result->blueprint->allowedUnitIds),
                     'section_label' => $slot->sectionLabel,
                     'display_no' => $slot->displayNo,
                     'marks' => $slot->marks,
@@ -111,6 +111,26 @@ class PaperController extends Controller
 
             return $paper;
         });
+    }
+
+    /**
+     * The unit the placed question displays as. Primary when the blueprint is
+     * unrestricted or allows it; otherwise the lowest-id tagged unit that IS
+     * allowed — the paper never labels a question with a unit the blueprint
+     * excluded (a multi-unit question can qualify through a secondary tag).
+     *
+     * @param  int[]  $allowedUnitIds
+     */
+    private function snapshotUnitId(Question $question, array $allowedUnitIds): ?int
+    {
+        if (empty($allowedUnitIds) || in_array((int) $question->unit_id, $allowedUnitIds, true)) {
+            return $question->unit_id;
+        }
+
+        $allowedTags = array_intersect($question->taggedUnitIds(), $allowedUnitIds);
+        sort($allowedTags);
+
+        return $allowedTags[0] ?? $question->unit_id;
     }
 
     private function paperPayload(Paper $paper, GenerationResult $result): array

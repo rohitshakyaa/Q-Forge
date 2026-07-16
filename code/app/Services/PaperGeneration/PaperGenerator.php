@@ -195,7 +195,7 @@ class PaperGenerator
             if ($deficit > 0) {
                 // Enrich the shortfall with a concrete unit id for the M5 top-up. On a
                 // unit-restricted blueprint an AI question must land on an allowed unit
-                // or CandidateFilter's whereIn(unit_id) hides it; target the allowed
+                // or CandidateFilter's allowed-units check hides it; target the allowed
                 // unit with the fewest matching approved questions so we fill the real
                 // gap (a unit with zero approved questions is thus preferred). An
                 // unrestricted blueprint keeps unitId null (no unit filter applies).
@@ -217,7 +217,8 @@ class PaperGenerator
         }
 
         // Supply is adequate but coverage is impossible: name the uncovered units.
-        $covered = collect($partial)->map(fn (Question $q) => $q->unit_id)->unique()->all();
+        // Union semantics — a multi-unit question covers every tagged unit.
+        $covered = collect($partial)->flatMap(fn (Question $q) => $q->taggedUnitIds())->unique()->all();
         $uncovered = array_diff($compiled->allowedUnitIds, $covered);
         $firstSlot = $compiled->slots[0] ?? null;
 
@@ -249,7 +250,11 @@ class PaperGenerator
             return null;
         }
 
-        $countsByUnit = $pool->groupBy('unit_id')->map->count();
+        // Supply per unit counts every tagged unit (a Units 2+3 question is
+        // supply for both), mirroring CandidateFilter's any-overlap rule.
+        $countsByUnit = $pool
+            ->flatMap(fn (Question $q) => $q->taggedUnitIds())
+            ->countBy();
 
         $allowed = $compiled->allowedUnitIds;
         sort($allowed);

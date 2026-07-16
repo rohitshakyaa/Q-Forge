@@ -18,13 +18,14 @@ class QuestionController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $questions = Question::query()
-            ->with(['subject', 'unit'])
+            ->with(['subject', 'unit', 'units'])
             ->when($request->filled('subject'), function ($q) use ($request) {
                 $q->whereHas('subject', fn ($s) => $s->where('code', $request->input('subject')));
             })
             // Scopes the review queue to the candidates a single upload produced.
             ->when($request->filled('upload'), fn ($q) => $q->where('attributes->upload_id', (int) $request->input('upload')))
-            ->when($request->filled('unit'), fn ($q) => $q->where('unit_id', $request->input('unit')))
+            // Any-tag match: a multi-unit question surfaces under every unit it touches.
+            ->when($request->filled('unit'), fn ($q) => $q->whereHas('units', fn ($u) => $u->where('units.id', $request->input('unit'))))
             ->when($request->filled('type'), fn ($q) => $q->where('type', $request->input('type')))
             ->when($request->filled('difficulty'), fn ($q) => $q->where('difficulty', $request->input('difficulty')))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->input('status')))
@@ -38,23 +39,33 @@ class QuestionController extends Controller
 
     public function show(Question $question): QuestionResource
     {
-        $question->load(['subject', 'unit']);
+        $question->load(['subject', 'unit', 'units']);
 
         return new QuestionResource($question);
     }
 
     public function store(QuestionRequest $request): QuestionResource
     {
-        $question = Question::create($request->validated());
-        $question->refresh()->load(['subject', 'unit']);
+        $data = $request->validated();
+        $unitIds = $data['unit_ids'] ?? null;
+        unset($data['unit_ids']);
+
+        $question = Question::create($data);
+        $question->syncUnitLinks($unitIds);
+        $question->refresh()->load(['subject', 'unit', 'units']);
 
         return new QuestionResource($question);
     }
 
     public function update(QuestionRequest $request, Question $question): QuestionResource
     {
-        $question->update($request->validated());
-        $question->load(['subject', 'unit']);
+        $data = $request->validated();
+        $unitIds = $data['unit_ids'] ?? null;
+        unset($data['unit_ids']);
+
+        $question->update($data);
+        $question->syncUnitLinks($unitIds);
+        $question->load(['subject', 'unit', 'units']);
 
         return new QuestionResource($question);
     }

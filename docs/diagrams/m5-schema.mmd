@@ -1,7 +1,8 @@
 %% QForge database schema after M5 — AI bank expansion
-%% SCHEMA UNCHANGED SINCE M4.
 %% AI-generated questions are ordinary QUESTIONS rows with source=ai (flagged for audit).
 %% Async AI top-up is tracked via Horizon job batches (framework infra), not a new domain table.
+%% Post-M5: QUESTION_UNIT pivot — a question may span several units; questions.unit_id
+%% stays the PRIMARY unit and always also appears in the pivot.
 erDiagram
     USERS ||--o{ BLUEPRINTS : owns
     USERS ||--o{ PAPERS : owns
@@ -11,8 +12,10 @@ erDiagram
     SUBJECTS ||--o{ BLUEPRINTS : "targets"
     SUBJECTS ||--o{ PAPERS : "for"
     SUBJECTS ||--o{ DOCUMENT_UPLOADS : "for"
-    UNITS ||--o{ QUESTIONS : "groups"
+    UNITS ||--o{ QUESTIONS : "groups (primary)"
     UNITS ||--o{ PAPER_QUESTIONS : "tags"
+    QUESTIONS ||--o{ QUESTION_UNIT : "tagged"
+    UNITS ||--o{ QUESTION_UNIT : "tags"
     BLUEPRINTS ||--o{ PAPERS : "generates"
     PAPERS ||--o{ PAPER_QUESTIONS : "contains"
     QUESTIONS ||--o{ PAPER_QUESTIONS : "appears in"
@@ -32,9 +35,13 @@ erDiagram
     QUESTIONS {
         bigint id PK
         bigint subject_id FK
-        bigint unit_id FK
+        bigint unit_id FK "primary unit"
         enum source "extracted|ai|manual"
         enum status "pending|approved|rejected"
+    }
+    QUESTION_UNIT {
+        bigint question_id FK
+        bigint unit_id FK "all tagged units, primary included"
     }
     BLUEPRINTS {
         bigint id PK

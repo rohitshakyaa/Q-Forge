@@ -59,7 +59,7 @@ class CandidateImporter
                     $unlinked++;
                 }
 
-                Question::create([
+                $question = Question::create([
                     'subject_id' => $upload->subject_id,
                     'unit_id' => $unit?->id,
                     'type' => $candidate['type'] ?? 'short',
@@ -76,6 +76,9 @@ class CandidateImporter
                         'exam_year' => $upload->meta['exam_year'] ?? null,
                     ], fn ($value) => $value !== null),
                 ]);
+
+                // Mirror the primary unit into the question_unit pivot.
+                $question->syncUnitLinks();
 
                 $created++;
             }

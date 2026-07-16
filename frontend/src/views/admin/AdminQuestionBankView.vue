@@ -118,7 +118,15 @@ const diffColor: Record<string, string> = {
                 {{ q.subject }}
               </span>
             </td>
-            <td style="color: var(--text2); font-size: 12.5px">{{ q.unit }}</td>
+            <td style="color: var(--text2); font-size: 12.5px">
+              {{ q.unit }}
+              <QFBadge
+                v-for="extra in q.units.filter((u) => u.name !== q.unit)"
+                :key="extra.id"
+                variant="neutral"
+                style="margin-left: 4px"
+              >+ {{ extra.name }}</QFBadge>
+            </td>
             <td><QFBadge variant="neutral">{{ q.type }}</QFBadge></td>
             <td style="font-family: var(--font-mono); font-size: 13px; font-weight: 600">
               {{ q.marks }}

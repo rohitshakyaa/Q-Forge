@@ -57,10 +57,11 @@ class ConstraintValidator
             pass: $gotMarks === $blueprint->totalMarks,
         );
 
-        // Unit coverage (only when the blueprint restricts units).
+        // Unit coverage (only when the blueprint restricts units). A multi-unit
+        // question covers every allowed unit it is tagged with.
         if (! empty($blueprint->allowedUnitIds)) {
             $coveredIds = collect($selections)
-                ->map(fn (Question $q) => $q->unit_id)
+                ->flatMap(fn (Question $q) => $q->taggedUnitIds())
                 ->unique()
                 ->intersect($blueprint->allowedUnitIds);
             $expectedCount = count($blueprint->allowedUnitIds);

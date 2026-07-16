@@ -202,7 +202,7 @@ class ExpandQuestionBank implements ShouldQueue
                 ], fn ($v) => $v !== null);
             }
 
-            Question::create([
+            $question = Question::create([
                 'subject_id' => $subjectId,
                 'unit_id' => $unitId,
                 'type' => $type,      // stamped from the slot, not the model
@@ -214,6 +214,7 @@ class ExpandQuestionBank implements ShouldQueue
                 'attributes' => $attributes ?: null,
                 'used_count' => 0,
             ]);
+            $question->syncUnitLinks();
 
             $stored++;
         }
