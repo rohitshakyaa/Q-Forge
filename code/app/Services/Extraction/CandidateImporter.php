@@ -4,6 +4,7 @@ namespace App\Services\Extraction;
 
 use App\Models\DocumentUpload;
 use App\Models\Question;
+use App\Services\Rag\SimilarQuestionFinder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -14,6 +15,8 @@ use Illuminate\Support\Facades\DB;
  */
 class CandidateImporter
 {
+    public function __construct(private readonly SimilarQuestionFinder $similar) {}
+
     /**
      * @param  array<int, array<string, mixed>>  $candidates
      * @return array{created:int, skipped:int, unlinked:int}
@@ -38,8 +41,9 @@ class CandidateImporter
         $created = 0;
         $skipped = 0;
         $unlinked = 0;
+        $createdQuestions = [];
 
-        DB::transaction(function () use ($upload, $candidates, $resolver, $existing, &$created, &$skipped, &$unlinked) {
+        DB::transaction(function () use ($upload, $candidates, $resolver, $existing, &$created, &$skipped, &$unlinked, &$createdQuestions) {
             foreach ($candidates as $candidate) {
                 $text = trim((string) ($candidate['text'] ?? ''));
                 if ($text === '') {
@@ -80,9 +84,16 @@ class CandidateImporter
                 // Mirror the primary unit into the question_unit pivot.
                 $question->syncUnitLinks();
 
+                $createdQuestions[] = $question;
                 $created++;
             }
         });
+
+        // M6 Phase 1: flag candidates that paraphrase an approved bank question
+        // ("similar to Q#123 (0.93)") so the reviewer decides — never auto-drop
+        // here. After the transaction: annotation is best-effort and must not
+        // roll back the import.
+        $this->similar->annotate($createdQuestions);
 
         return ['created' => $created, 'skipped' => $skipped, 'unlinked' => $unlinked];
     }

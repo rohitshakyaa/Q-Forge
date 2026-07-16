@@ -96,6 +96,21 @@ class GenerateQuestionsRequest(BaseModel):
     units: list[str] = Field(default_factory=list, max_length=2)
 
 
+class EmbedRequest(BaseModel):
+    """Input to `/embed` (M6 — RAG). Laravel sends texts; vectors come back in
+    input order. Batched: a re-index sends many texts per call, a dedup check one."""
+
+    texts: list[str] = Field(min_length=1, max_length=256)
+
+
+class EmbedData(BaseModel):
+    # Model + dimensions are echoed so Laravel can stamp them next to stored
+    # vectors — vectors from different models are incomparable (RAG-GUIDE §6).
+    model: str
+    dimensions: int
+    embeddings: list[list[float]]
+
+
 class GeneratedQuestion(BaseModel):
     """One AI-authored question. `type`/`marks` are echoed by the model as a sanity
     signal — Laravel is authoritative and re-stamps them from the target slot."""

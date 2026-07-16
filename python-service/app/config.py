@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     llm_provider: str = Field("ollama", validation_alias="LLM_PROVIDER")
     ollama_url: str = Field("http://qforge_ollama:11434", validation_alias="OLLAMA_URL")
     ollama_model: str = Field("qwen2.5:3b-instruct", validation_alias="OLLAMA_MODEL")
+    # M6 (RAG) — embedding model for /embed. Same Ollama server, different model;
+    # LLM_PROVIDER=stub also selects the deterministic stub embedder for tests.
+    ollama_embed_model: str = Field(
+        "nomic-embed-text", validation_alias="OLLAMA_EMBED_MODEL"
+    )
     # When true, log the exact prompt sent to the model and its raw response, so the
     # generation can be inspected in `docker compose logs qforge_python`.
     llm_debug: bool = Field(False, validation_alias="LLM_DEBUG")

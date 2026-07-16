@@ -87,6 +87,24 @@ export interface Candidate {
   page: number | null;
   ocr: boolean;
   uploadId: number | null;
+  /** M6: nearest approved lookalike found at extraction time (flag-only — the reviewer decides). */
+  similar: SimilarQuestion | null;
+  /** M6 Phase 3: ranked unit suggestions, best first (pre-fill only — units stay human-assigned). */
+  suggestedUnits: SuggestedUnit[];
+}
+
+/** One entry of `attributes.suggested_units`. */
+export interface SuggestedUnit {
+  unitId: number;
+  /** Best content-chunk similarity for that unit, in [0, 1]. */
+  score: number;
+}
+
+/** `attributes.similar` — written by the backend's SimilarQuestionFinder. */
+export interface SimilarQuestion {
+  questionId: number;
+  /** Cosine similarity in [0, 1]; ≥ the backend threshold (default 0.90). */
+  score: number;
 }
 
 export interface UnitOption {
@@ -188,6 +206,8 @@ const mapUpload = (u: ApiUpload): Upload => ({
 
 const mapCandidate = (q: ApiCandidate): Candidate => {
   const attrs = q.attributes ?? {};
+  const similar = attrs.similar as { question_id?: number; score?: number } | undefined;
+  const suggested = (attrs.suggested_units as Array<{ unit_id?: number; score?: number }> | undefined) ?? [];
 
   return {
     id: q.id,
@@ -205,6 +225,13 @@ const mapCandidate = (q: ApiCandidate): Candidate => {
     page: (attrs.page as number) ?? null,
     ocr: Boolean(attrs.ocr),
     uploadId: (attrs.upload_id as number) ?? null,
+    similar:
+      similar?.question_id != null && similar?.score != null
+        ? { questionId: similar.question_id, score: similar.score }
+        : null,
+    suggestedUnits: suggested
+      .filter((s) => s.unit_id != null && s.score != null)
+      .map((s) => ({ unitId: s.unit_id as number, score: s.score as number })),
   };
 };
 

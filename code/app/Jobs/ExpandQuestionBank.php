@@ -7,6 +7,7 @@ use App\Models\Question;
 use App\Models\Unit;
 use App\Services\AiExpansion\GroundingBuilder;
 use App\Services\PythonService;
+use App\Services\Rag\DuplicateDetector;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -50,8 +51,16 @@ class ExpandQuestionBank implements ShouldQueue
         public readonly array $slots,
     ) {}
 
-    public function handle(PythonService $python, GroundingBuilder $grounding): void
+    /**
+     * The detector is stateful for the whole run (its in-memory pool spans slots
+     * and retry rounds), so it lives on the job, not in a method signature.
+     */
+    private DuplicateDetector $detector;
+
+    public function handle(PythonService $python, GroundingBuilder $grounding, DuplicateDetector $detector): void
     {
+        $this->detector = $detector;
+
         $blueprint = Blueprint::with('subject')->find($this->blueprintId);
 
         if ($blueprint === null || $blueprint->subject === null) {
@@ -60,7 +69,6 @@ class ExpandQuestionBank implements ShouldQueue
             return;
         }
 
-        $subject = $blueprint->subject;
         $totalStored = 0;
 
         foreach ($this->slots as $slot) {
@@ -171,6 +179,14 @@ class ExpandQuestionBank implements ShouldQueue
      * so an AI question always matches the slot CandidateFilter will query. With two
      * target units the first becomes the primary and both are tagged on the pivot.
      *
+     * Dedup is layered (M6 Phase 1 — docs/RAG-GUIDE.md):
+     *  1. normalized-text match — free, catches verbatim repeats;
+     *  2. embedding similarity — catches *paraphrases* ("Explain X" vs "Describe X"),
+     *     against the indexed bank and this run's own earlier survivors. Fails open:
+     *     if RAG is disabled or down, layer 1 alone decides, and the run continues.
+     * Dropping is safe precisely here because this is an automated pipeline that
+     * over-asks (BUFFER) — human-submitted questions are never auto-dropped.
+     *
      * @param  int[]  $unitIds
      * @param  array<int, array<string, mixed>>  $candidates
      */
@@ -186,6 +202,11 @@ class ExpandQuestionBank implements ShouldQueue
             ->mapWithKeys(fn ($t) => [$this->normalize((string) $t) => true])
             ->all();
 
+        // One /embed round-trip for the whole batch (null = semantic layer off).
+        $texts = array_map(fn ($c) => trim((string) ($c['text'] ?? '')), $candidates);
+        $vectors = $this->detector->embed(array_filter($texts, fn ($t) => $t !== ''));
+        $vectorAt = 0;
+
         $stored = 0;
 
         foreach ($candidates as $candidate) {
@@ -193,12 +214,25 @@ class ExpandQuestionBank implements ShouldQueue
             if ($text === '') {
                 continue; // Defensive: Python already filters these.
             }
+            $vector = $vectors !== null ? $vectors[$vectorAt++] : null;
 
             $key = $this->normalize($text);
             if (isset($seen[$key])) {
                 continue; // Duplicate of an existing or just-stored question.
             }
             $seen[$key] = true;
+
+            if ($vector !== null
+                && ($lookalike = $this->detector->nearestDuplicate($subjectId, $vector)) !== null) {
+                Log::info('ExpandQuestionBank: dropped a near-duplicate candidate', [
+                    'subject_id' => $subjectId, 'type' => $type,
+                    'similar_to' => $lookalike['id'], // null = an earlier candidate in this run
+                    'score' => round($lookalike['score'], 4),
+                    'text' => $text,
+                ]);
+
+                continue;
+            }
 
             if (($candidate['type'] ?? $type) !== $type || (int) ($candidate['marks'] ?? $marks) !== $marks) {
                 Log::warning('ExpandQuestionBank: model echoed a mismatched type/marks; stamping the slot values', [
@@ -228,6 +262,12 @@ class ExpandQuestionBank implements ShouldQueue
             ]);
             // Tag every target unit (never sync([]) — that would detach the primary).
             $question->syncUnitLinks($unitIds !== [] ? $unitIds : null);
+
+            // Later candidates must be checked against this one too — its queued
+            // index job (QuestionObserver) won't have run inside this batch.
+            if ($vector !== null) {
+                $this->detector->accept($vector);
+            }
 
             $stored++;
         }

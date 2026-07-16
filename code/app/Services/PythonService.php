@@ -72,6 +72,40 @@ class PythonService
      *
      * @throws RuntimeException when the service is unreachable or reports failure.
      */
+    /**
+     * Turn texts into embedding vectors (M6 — RAG, docs/RAG-GUIDE.md).
+     *
+     * Python is processing-only here: text in, vectors out. Laravel owns what
+     * happens next — storing them in Qdrant and every similarity search. The
+     * echoed `model`/`dimensions` get stamped next to stored vectors so a model
+     * swap makes stale (incomparable) vectors detectable.
+     *
+     * @param  string[]  $texts
+     * @return array{model: string, dimensions: int, embeddings: array<int, array<int, float>>}
+     *
+     * @throws RuntimeException when the service is unreachable or reports failure.
+     */
+    public function embed(array $texts): array
+    {
+        $response = $this->client()
+            ->timeout((int) config('services.python.embed_timeout'))
+            ->post('/embed', ['texts' => array_values($texts)]);
+
+        if ($response->failed()) {
+            throw new RuntimeException("python /embed returned HTTP {$response->status()}");
+        }
+
+        $body = $response->json();
+
+        if (($body['status'] ?? null) !== 'success') {
+            $errors = $body['errors'] ?? ['python /embed reported an unknown error'];
+
+            throw new RuntimeException(implode('; ', $errors));
+        }
+
+        return $body['data'];
+    }
+
     public function generateQuestions(string $grounding, string $type, int $marks, int $count, array $unitNames = []): array
     {
         $response = $this->client()

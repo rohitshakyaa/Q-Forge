@@ -8,6 +8,8 @@ from pydantic import ValidationError
 logging.basicConfig(level=logging.INFO)
 
 from .schemas import (
+    EmbedData,
+    EmbedRequest,
     Envelope,
     ExtractData,
     ExtractRequest,
@@ -15,6 +17,7 @@ from .schemas import (
     GenerateQuestionsRequest,
 )
 from .services import parser, pdf, syllabus
+from .services.embedding import get_embedder
 from .services.llm import get_provider
 
 logger = logging.getLogger(__name__)
@@ -60,6 +63,31 @@ def extract(request: ExtractRequest) -> Envelope[ExtractData]:
                 "characters": sum(len(page.text) for page in pages),
                 "type": request.type,
             },
+        )
+    )
+
+
+@app.post("/embed", response_model=Envelope[EmbedData])
+def embed(request: EmbedRequest) -> Envelope[EmbedData]:
+    """Turn texts into embedding vectors (M6 — RAG, docs/RAG-GUIDE.md).
+
+    Processing only: text in, vectors out. Laravel owns what happens next —
+    storing them in Qdrant and running every similarity search. Unlike
+    generation there is no partial success: the batch embeds or it doesn't.
+    """
+    embedder = get_embedder()
+
+    try:
+        embeddings = embedder.embed(request.texts)
+    except Exception as exc:  # noqa: BLE001 - surface the reason, never 500 the caller
+        logger.exception("embedding failed")
+        return Envelope.fail(f"embedding failed: {exc}")
+
+    return Envelope.ok(
+        EmbedData(
+            model=embedder.model,
+            dimensions=embedder.dimensions,
+            embeddings=embeddings,
         )
     )
 

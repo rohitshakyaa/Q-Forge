@@ -97,6 +97,8 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
       - OLLAMA_URL=${OLLAMA_URL:-http://qforge_ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      # M6: embedding model for /embed (RAG). Same Ollama, different model.
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       - LLM_DEBUG=${LLM_DEBUG:-false}
     depends_on:
       - qforge_ollama
@@ -112,9 +114,25 @@ services:
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-nomic-embed-text}
     volumes:
       - qforge_ollama_data:/root/.ollama
       - ./build/ollama/entrypoint.sh:/entrypoint.sh:ro
+    networks:
+      - local
+
+  # M6 (RAG): vector index for embeddings. An INDEX, not a database — MySQL stays
+  # the source of truth and `artisan qforge:rag:reindex` can rebuild this from
+  # scratch. Only Laravel talks to it (REST, port 6333), like Redis.
+  qforge_qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ${CONTAINER_NAME_PREFIX}qdrant
+    restart: unless-stopped
+    ports:
+      # Host access for the built-in dashboard: http://localhost:6333/dashboard
+      - "${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qforge_qdrant_data:/qdrant/storage
     networks:
       - local
 
@@ -166,3 +184,5 @@ volumes:
     name: ${CONTAINER_NAME_PREFIX}db
   qforge_ollama_data:
     name: ${CONTAINER_NAME_PREFIX}ollama
+  qforge_qdrant_data:
+    name: ${CONTAINER_NAME_PREFIX}qdrant

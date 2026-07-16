@@ -83,9 +83,25 @@ const beginEdit = (c: Candidate) => {
     text: c.text,
     marks: c.marks === null ? '' : String(c.marks),
     type: c.type,
-    unitId: c.unitId === null ? '' : String(c.unitId),
+    // M6 Phase 3: an untagged candidate opens with the top RAG suggestion
+    // pre-selected — one click to confirm, still the human's call to change.
+    unitId:
+      c.unitId !== null
+        ? String(c.unitId)
+        : c.suggestedUnits.length > 0
+          ? String(c.suggestedUnits[0].unitId)
+          : '',
     additionalUnitIds: c.unitIds.filter((u) => u !== c.unitId),
   };
+};
+
+/** M6 Phase 3: resolve a suggested unit id to its name (suggestions may cite a unit outside the current filter — hide those). */
+const unitName = (unitId: number) => extraction.units.find((u) => u.id === unitId)?.name ?? null;
+
+/** Apply a suggestion chip: open (or update) the edit form with that unit selected. */
+const applySuggestion = (c: Candidate, unitId: number) => {
+  if (!isEditing(c.id)) beginEdit(c);
+  drafts[c.id].unitId = String(unitId);
 };
 
 /** Units offered as "also covers": everything except the draft's primary. */
@@ -286,6 +302,10 @@ watch([filter, selectedSubject], load);
                   <QFBadge v-else variant="warn">marks not detected</QFBadge>
                   <QFBadge variant="neutral">{{ c.type }}</QFBadge>
                   <QFBadge v-if="c.ocr" variant="ai" dot>OCR</QFBadge>
+                  <!-- M6: nearest-lookalike flag — informational, never blocks approval -->
+                  <QFBadge v-if="c.similar" variant="warn" dot>
+                    ≈ Q#{{ c.similar.questionId }} ({{ Math.round(c.similar.score * 100) }}% similar)
+                  </QFBadge>
                   <span v-if="c.page" style="font-size: 11px; color: var(--text3)">p.{{ c.page }}</span>
                   <span v-if="c.unitHint" style="font-size: 11px; color: var(--text3)">
                     hint: {{ c.unitHint }}
@@ -392,6 +412,29 @@ watch([filter, selectedSubject], load);
                   <QFBadge v-else variant="warn">marks not detected</QFBadge>
                   <QFBadge variant="neutral">{{ c.type }}</QFBadge>
                   <QFBadge v-if="c.ocr" variant="ai" dot>OCR</QFBadge>
+                  <!-- M6: nearest-lookalike flag — informational, never blocks approval -->
+                  <QFBadge v-if="c.similar" variant="warn" dot>
+                    ≈ Q#{{ c.similar.questionId }} ({{ Math.round(c.similar.score * 100) }}% similar)
+                  </QFBadge>
+                  <!-- M6 Phase 3: RAG unit suggestions — click to apply, human confirms on approve -->
+                  <template v-for="s in c.suggestedUnits" :key="s.unitId">
+                    <button
+                      v-if="unitName(s.unitId)"
+                      :style="{
+                        fontSize: '11px',
+                        padding: '2px 8px',
+                        borderRadius: '999px',
+                        border: '1px dashed var(--cyan)',
+                        color: 'var(--cyan)',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                      }"
+                      :title="`Suggested from course material (similarity ${Math.round(s.score * 100)}%) — click to apply`"
+                      @click="applySuggestion(c, s.unitId)"
+                    >
+                      💡 {{ unitName(s.unitId) }} · {{ Math.round(s.score * 100) }}%
+                    </button>
+                  </template>
                   <span v-if="c.unitHint" style="font-size: 11px; color: var(--text3)">
                     hint: {{ c.unitHint }}
                   </span>

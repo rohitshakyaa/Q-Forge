@@ -210,20 +210,22 @@ export const usePapersStore = defineStore('papers', () => {
   /**
    * Poll a batch's status until it finishes or fails (or we give up).
    *
-   * Two independent guards, because a healthy expansion can run several minutes
+   * Two independent guards, because a healthy expansion can run many minutes
    * (queue wait + slow local-LLM generation):
-   *  - a hard 10-minute ceiling on the whole poll, so it can't hang forever;
+   *  - a hard 30-minute ceiling on the whole poll, so it can't hang forever;
    *  - a no-progress stall guard — we only give up early if `progress` hasn't
-   *    advanced for STALL_LIMIT consecutive polls. Actively generating never
-   *    counts against us (progress ticks up), only a genuinely stuck job does.
-   *    Note: the batch reports 'processing' with progress=0 while still *queued*,
-   *    which is indistinguishable from a stuck job here, so STALL_LIMIT is set
-   *    generously above a realistic worst-case queue wait to avoid false aborts.
+   *    advanced for STALL_LIMIT consecutive polls.
+   *    Caveat that sizes STALL_LIMIT: the expansion batch holds ONE job, so
+   *    `progress` stays at 0 until the whole job completes — a healthy
+   *    multi-slot run (each long-answer round is minutes on CPU) looks exactly
+   *    like a stuck one. The stall window must therefore exceed a realistic
+   *    worst-case *whole run*, not a queue wait; the backend job's own
+   *    timeout/retry (tries=2, timeout=600s) is the real stuck-job detector.
    */
   async function pollJob(jobId: string): Promise<boolean> {
-    const POLL_INTERVAL_MS = 2000;
-    const MAX_ATTEMPTS = (10 * 60 * 1000) / POLL_INTERVAL_MS; // 10 minutes
-    const STALL_LIMIT = 90; // ~3 min with no forward progress → assume stuck
+    const POLL_INTERVAL_MS = 3000;
+    const MAX_ATTEMPTS = (30 * 60 * 1000) / POLL_INTERVAL_MS; // 30 minutes
+    const STALL_LIMIT = 400; // ~20 min with no forward progress → assume stuck
 
     let lastProgress = -1;
     let stalledPolls = 0;

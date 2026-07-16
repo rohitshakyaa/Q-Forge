@@ -63,7 +63,19 @@ class BankExpansionController extends Controller
 
         // Owner id is baked into the batch name so the status endpoint can authorize
         // without a domain table (M5 adds none) — see jobStatus().
-        $batch = Bus::batch([new ExpandQuestionBank($blueprint->id, $slots)])
+        //
+        // One job PER SLOT (not one job for all): batch progress then ticks as
+        // each slot completes, so the frontend's stall guard measures real
+        // forward motion instead of timing out a healthy multi-slot run — on
+        // CPU a full run can exceed any flat window. Failure isolation improves
+        // too (allowFailures: one dead slot no longer takes the rest with it).
+        // Known trade-off: the in-memory same-run dedup pool (M6) no longer
+        // spans slots — cross-slot near-dupes still get caught later via the
+        // indexed bank, just not within one batch; acceptable, since slots
+        // differ by type/marks and rarely collide.
+        $batch = Bus::batch(
+            array_map(fn (array $slot) => new ExpandQuestionBank($blueprint->id, [$slot]), $slots)
+        )
             ->name("expand-bank:{$blueprint->id}:{$request->user()->id}")
             ->allowFailures()
             ->dispatch();

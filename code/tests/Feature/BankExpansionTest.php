@@ -148,7 +148,7 @@ class BankExpansionTest extends TestCase
         ], $missing);
 
         (new ExpandQuestionBank($blueprint->id, $slots))
-            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+            ->handle(app(PythonService::class), app(GroundingBuilder::class), app(\App\Services\Rag\DuplicateDetector::class));
 
         // AI questions are approved, AI-sourced, and land on the resolved unit + marks.
         $ai = Question::where('source', 'ai')->get();
@@ -188,7 +188,7 @@ class BankExpansionTest extends TestCase
         ], $missing);
 
         (new ExpandQuestionBank($blueprint->id, $slots))
-            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+            ->handle(app(PythonService::class), app(GroundingBuilder::class), app(\App\Services\Rag\DuplicateDetector::class));
 
         // Two rounds were needed; three distinct AI questions landed on the unit.
         Http::assertSentCount(2);
@@ -217,7 +217,7 @@ class BankExpansionTest extends TestCase
         ]];
 
         (new ExpandQuestionBank($blueprint->id, $slots))
-            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+            ->handle(app(PythonService::class), app(GroundingBuilder::class), app(\App\Services\Rag\DuplicateDetector::class));
 
         // Only the single distinct question is stored, and we stopped after the empty round.
         $this->assertSame(1, Question::where('source', 'ai')->count());
@@ -245,7 +245,7 @@ class BankExpansionTest extends TestCase
         ]];
 
         (new ExpandQuestionBank($blueprint->id, $slots))
-            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+            ->handle(app(PythonService::class), app(GroundingBuilder::class), app(\App\Services\Rag\DuplicateDetector::class));
 
         // Both survivors stored, both stamped long/10 regardless of the echoed values.
         $ai = Question::where('source', 'ai')->get();
@@ -349,7 +349,7 @@ class BankExpansionTest extends TestCase
         ]];
 
         (new ExpandQuestionBank($blueprint->id, $slots))
-            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+            ->handle(app(PythonService::class), app(GroundingBuilder::class), app(\App\Services\Rag\DuplicateDetector::class));
 
         $ai = Question::where('source', 'ai')->get();
         $this->assertGreaterThanOrEqual(1, $ai->count());

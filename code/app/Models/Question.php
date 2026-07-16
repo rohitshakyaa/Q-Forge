@@ -2,12 +2,16 @@
 
 namespace App\Models;
 
+use App\Observers\QuestionObserver;
 use Database\Factories\QuestionFactory;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
+// M6: every save/delete queues a Qdrant vector sync (no-op when RAG is disabled).
+#[ObservedBy(QuestionObserver::class)]
 class Question extends Model
 {
     /** @use HasFactory<QuestionFactory> */

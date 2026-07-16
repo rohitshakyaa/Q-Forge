@@ -5,7 +5,7 @@
 > code disagree, the **code wins** and the difference is called out. Anything I could not
 > fully verify is marked `[verify]`.
 
-**How to use this:** read sections 1–6 to understand the system, drill sections 7–9 the night
+**How to use this:** read sections 1–6.5 to understand the system, drill sections 7–9 the night
 before, and keep section 10 open during the viva.
 
 ---
@@ -21,9 +21,13 @@ that treats paper generation as a puzzle: fill every slot with a question that s
 rules (right type, right marks, allowed unit, no repeats) while balancing soft preferences. When the
 question bank is too thin to satisfy a blueprint, QForge can call a **local AI model** to *top up*
 the bank — but the AI only writes candidate questions; the algorithm always decides the final paper.
-This matters because it saves teachers hours of manual work while guaranteeing the exam obeys the
-rules, and it stays **explainable**: for any paper it can tell you exactly which constraints passed,
-and for any failure it names exactly what the bank was missing.
+Since M6 the AI pipeline is **retrieval-augmented (RAG)**: course material and questions are indexed
+as embeddings in a vector database, so generation prompts are built from the *most relevant* content,
+AI near-duplicates are auto-dropped before they enter the bank, and extracted questions get unit
+suggestions — all behind the algorithm, never above it. This matters because it saves teachers hours
+of manual work while guaranteeing the exam obeys the rules, and it stays **explainable**: for any
+paper it can tell you exactly which constraints passed, and for any failure it names exactly what the
+bank was missing.
 
 **Jargon defined once:**
 - **Blueprint** = the reusable template describing an exam's structure and rules.
@@ -409,6 +413,7 @@ Taken from the migrations in [`code/database/migrations/`](../code/database/migr
 | **papers** | A generated or imported paper | `id`, `owner_id` (FK), `blueprint_id` (FK, **nullable** since M3.1), `subject_id` (FK), `name`, `total_marks`, `duration`, `status` (draft/saved/exported), `export_count`, `generated_at`, `origin` (generated/imported, M3.1) |
 | **paper_questions** | Snapshot of which questions are in a paper (source of truth for repetition) | `id`, `paper_id` (FK), `question_id` (FK), `unit_id` (FK), `section_label`, `display_no`, `marks`, `is_ai` (bool) |
 | **document_uploads** | Tracks async PDF extraction jobs (M4) | `id`, `uploader_id` (FK), `subject_id` (FK, nullable), `type` (syllabus/past_paper), `original_filename`, `stored_path`, `status` (uploaded/processing/parsed/failed), `error`, `meta` (JSON) |
+| **content_chunks** | The RAG retrieval corpus (M6): `units.content` + `subjects.syllabus` split into retrievable pieces | `id` (doubles as the Qdrant point id), `subject_id` (FK), `unit_id` (FK, **null = subject-level syllabus chunk**), `position`, `heading` (context path, e.g. "CS301 > Unit 3"), `text`. **Derived data** — wholesale-replaced on re-chunk, nothing FKs into it; the vector twin lives in Qdrant (infrastructure, not schema). |
 
 **Important schema facts to defend:**
 - `questions.unit_id` and `questions.marks` started **NOT NULL** and were made **nullable** by
@@ -440,6 +445,8 @@ erDiagram
     UNITS ||--o{ QUESTION_UNIT : "tagged by"
     QUESTIONS ||--o{ QUESTION_UNIT : "spans units via"
     UNITS ||--o{ PAPER_QUESTIONS : tags
+    SUBJECTS ||--o{ CONTENT_CHUNKS : "chunked into (M6)"
+    UNITS ||--o{ CONTENT_CHUNKS : "chunked into (nullable)"
     BLUEPRINTS ||--o{ PAPERS : generates
     PAPERS ||--o{ PAPER_QUESTIONS : contains
     QUESTIONS ||--o{ PAPER_QUESTIONS : "appears in"
@@ -504,6 +511,14 @@ erDiagram
         bigint subject_id FK "nullable"
         enum type "syllabus|past_paper"
         enum status "uploaded|processing|parsed|failed"
+    }
+    CONTENT_CHUNKS {
+        bigint id PK "= Qdrant point id (M6)"
+        bigint subject_id FK
+        bigint unit_id FK "null = syllabus chunk"
+        smallint position "reading order"
+        string heading "context path"
+        text text
     }
 ```
 
@@ -718,9 +733,11 @@ Model — an AI that writes text) to author fresh candidate questions to fill th
 5. Otherwise it dispatches [`ExpandQuestionBank`](../code/app/Jobs/ExpandQuestionBank.php) inside a
    `Bus::batch` and returns a `jobId`. The frontend polls `GET /jobs/{batchId}`.
 6. The job, per missing slot: builds a **grounding block** once with
-   [`GroundingBuilder`](../code/app/Services/AiExpansion/GroundingBuilder.php) = the subject syllabus
-   + each target unit's content + up to 3 approved example questions of the same type (tag-aware,
-   via the pivot). A slot may target **one or two units** (`MissingSlot.unitIds`, scarcest first):
+   [`GroundingBuilder`](../code/app/Services/AiExpansion/GroundingBuilder.php). Since M6 this is a
+   **budget-based hybrid** (see §6.5): full syllabus + target-unit content when it fits the prompt
+   budget, the top-k semantically-retrieved chunks when it doesn't — plus the 3 approved exemplars
+   picked **by similarity** (was: first three by id). A slot may target **one or two units**
+   (`MissingSlot.unitIds`, scarcest first):
    with two, the block adds an explicit directive — *"every question must span BOTH units above"* —
    and Python's prompt demands questions that *"genuinely integrate material from BOTH units"*.
    Then it **retries**: `fillSlot` calls
@@ -738,10 +755,12 @@ Model — an AI that writes text) to author fresh candidate questions to fill th
 8. Back in the job, survivors are stored as ordinary `questions` rows with **`source=ai`,
    `status=approved`**, with `type` and `marks` **stamped from the slot** (not from the model), the
    **primary unit = the slot's first (scarcest) target**, and **every target unit tagged** on the
-   `question_unit` pivot via `syncUnitLinks`. `storeSurvivors` **dedups by normalized text** against
-   the existing bank (lowercased, whitespace-collapsed), so a model that repeats itself across
-   retries can't spam near-identical rows — important because the "no repeated questions" rule
-   checks by *id*, so duplicate wording would otherwise slip through into a paper.
+   `question_unit` pivot via `syncUnitLinks`. `storeSurvivors` dedups in **two layers** (M6):
+   **normalized text** (lowercased, whitespace-collapsed — catches verbatim repeats) and **embedding
+   similarity ≥ 0.90** via `DuplicateDetector` (catches *paraphrases*, against the indexed bank and
+   this run's own earlier survivors) — so a model that repeats itself across retries can't spam
+   near-identical rows. Important because the "no repeated questions" rule checks by *id*, so
+   duplicate wording would otherwise slip through into a paper.
 9. The teacher regenerates; the new questions are now selectable and the paper succeeds. When the
    blueprint mandates **more units than it has slots** (the supervisor's 12-units/10-questions
    case), `computeMissingSlots` pairs the `2 × (units − slots)` **scarcest** units into two-unit
@@ -759,13 +778,89 @@ Model — an AI that writes text) to author fresh candidate questions to fill th
   first target; the full set is tagged on the pivot). The prompt *tells* the model which units to
   write about; nothing about units is ever parsed back from its output.
 - ❌ It does **not** touch the database — Python has no DB access; Laravel validates and persists.
-- ❌ It does **not** do retrieval — the "RAG" here is *deterministic SQL by primary key* in
-  `GroundingBuilder`; there are no embeddings or vector store.
+- ❌ It does **not** do retrieval — ~~the "RAG" here is deterministic SQL by primary key~~ **since
+  M6 the retrieval is real RAG** (embeddings + Qdrant, §6.5) — but it is still *Laravel* that
+  retrieves; Python only embeds text and writes questions, exactly as before.
 
 **The one-line defense:** *"AI is a supportive content generator behind the algorithm. It fills the
 bank's gaps with grounded candidate text; Laravel stamps the hard fields, and the deterministic
 algorithm still makes every selection decision. If the AI is unavailable or produces junk, the system
 degrades to 'bank too thin' — it never produces an invalid paper."*
+
+---
+
+## 6.5. RAG (M6) — retrieval by meaning, behind the algorithm
+
+*(Full teaching companion with concepts from zero: [`RAG-GUIDE.md`](RAG-GUIDE.md). This section is
+the viva-sized version.)*
+
+**The idea in one line:** M6 upgraded retrieval from *lookup by id* to *search by meaning*. An
+**embedding model** (`nomic-embed-text`, served by the same Ollama container) turns any text into a
+768-number vector where **similar meaning ⇒ nearby vectors**; **cosine similarity** measures that
+nearness; **Qdrant** (a vector database, one new container) stores the vectors and answers
+"top-k nearest, filtered by subject/unit/type" in milliseconds.
+
+**The architecture ruling (say this verbatim if asked):** *"Embedding is processing, so it lives in
+Python (`POST /embed`); retrieval is decision-making over data, so it lives in Laravel. Qdrant is an
+**index, not a database** — MySQL stays the single source of truth, every vector is derived from a
+MySQL row, and `artisan qforge:rag:reindex` rebuilds the whole index from scratch. Only Laravel
+talks to Qdrant, like Redis."*
+
+**What stays in sync automatically (the write path):**
+- [`QuestionObserver`](../code/app/Observers/QuestionObserver.php) on every `Question` save/delete →
+  queued [`SyncQuestionEmbedding`](../code/app/Jobs/SyncQuestionEmbedding.php): approved ⇒ embed +
+  upsert; rejected/deleted ⇒ remove the vector. Idempotent — the job re-reads DB state and converges.
+- [`ContentObserver`](../code/app/Observers/ContentObserver.php) on `Subject.syllabus` /
+  `Unit.content` changes → [`SyncSubjectChunks`](../code/app/Jobs/SyncSubjectChunks.php)
+  (`ShouldBeUnique` per subject = a syllabus import's burst of unit saves collapses into **one**
+  rebuild) → [`ContentIndexer`](../code/app/Services/Rag/ContentIndexer.php): re-chunk
+  ([`ContentChunker`](../code/app/Services/Rag/ContentChunker.php) — markdown-heading splits,
+  ~1600-char paragraph packing, runt merging, context-path prefixes), replace `content_chunks`
+  rows, batch-embed, upsert.
+
+**The three consumers:**
+
+1. **Semantic dedup in AI expansion** (auto-drop).
+   [`DuplicateDetector`](../code/app/Services/Rag/DuplicateDetector.php) inside
+   `ExpandQuestionBank::storeSurvivors`: one batched embed per candidate round, then per candidate a
+   Qdrant top-1 search (same subject) **plus** an in-memory cosine sweep against candidates accepted
+   earlier in the same run (their index jobs haven't run yet). Score ≥ `RAG_DUPLICATE_THRESHOLD`
+   (0.90, env-tunable) ⇒ dropped and logged. *Seen live:* the model regenerated its own data-cube
+   and Apriori questions at **0.9979 / 0.9788** — both refused; M5 would have stored both.
+2. **Hybrid grounding** (better prompts).
+   `GroundingBuilder` embeds a natural-language *slot query* ("A 10-mark long exam question about X
+   in Y"), then: full material when it fits `RAG_GROUNDING_BUDGET_CHARS` (default 6000 ≈ 1500
+   tokens — *for a small corpus, complete context beats top-k excerpts of it*), else the top-k
+   chunks nearest the slot query, under their context-path headings. Exemplars are always the
+   semantic top-3 (similarity order). The `notes` array records which path ran. *Measured:* the
+   same slot's grounding went 4,071 → 1,616 chars on the retrieval path, containing only the target
+   unit's material.
+3. **Unit auto-suggest in the review queue** (suggest-only).
+   [`SimilarQuestionFinder`](../code/app/Services/Rag/SimilarQuestionFinder.php) annotates extracted
+   candidates in one embedding pass: `attributes.similar` (nearest approved lookalike ≥ 0.90 —
+   warning badge, human decides) and `attributes.suggested_units` (each unit's best chunk score,
+   floor 0.50, top 3 — clickable 💡 chips that pre-fill the form). *Seen live:* a SWOT/environmental-
+   scanning question suggested "Planning and Decision Making" at 0.751 without the word "planning"
+   appearing in it.
+
+**Two postures, one deliberate asymmetry:** the *automated* pipeline (AI expansion, which over-asks)
+**auto-drops** duplicates — losing a candidate costs nothing; the *human* pipeline (review queue)
+only **flags** — embedding similarity has false positives ("Define TCP" vs "Define UDP" score
+high), and past papers legitimately repeat questions, so a human eats those calls.
+
+**Everything fails open.** One switch (`RAG_ENABLED`, off in the test suite) and try/catch at every
+seam: if Python or Qdrant is down, expansion degrades to exact-text dedup + M5 grounding, extraction
+skips annotations, and **no upload, expansion, or approval ever fails because the index is sick**.
+
+**What RAG does NOT do (the boundary, same spirit as §6):**
+- ❌ It never selects paper questions — the greedy/backtracking engine is untouched; "no repeats"
+  on papers stays by-id. RAG curates what enters the *bank* and the *prompt*, never the paper.
+- ❌ It never auto-assigns units — suggestions pre-fill, the human confirms (Post-M5 rule preserved).
+- ❌ It never blocks a human — review-queue flags are advisory; approval is never gated on a score.
+
+**The one-line defense:** *"The LLM may repeat itself; the bank won't — up to the similarity
+threshold, whenever the index is healthy. And retrieval feeds the prompt and the bank, never the
+paper: the deterministic algorithm still makes every selection decision."*
 
 ---
 
@@ -802,11 +897,17 @@ degrades to 'bank too thin' — it never produces an invalid paper."*
    responsive and jobs get retries and monitoring."*
 9. *"The engine is **unit-tested in isolation** because it's pure with respect to writes — it reads
    the bank and returns a value object; the controller persists. Those tests *are* the proof of the
-   academic contribution."* *(29 tests green at M2; 161 Laravel + 147 pytest across the project per
+   academic contribution."* *(29 tests green at M2; 198 Laravel + 153 pytest across the project per
    the milestone log.)*
 10. *"It's a **realistic pipeline end to end**: upload a real past-paper PDF → OCR + heuristic parse →
     admin review → into the bank → used in generation → export to PDF/DOCX from one shared
     view-model."*
+11. *"M6 adds **real RAG, with engineering judgment**: embeddings + a vector DB (Qdrant) for semantic
+    dedup, retrieval-augmented grounding, and unit suggestions — but as a **budget-based hybrid**
+    (small corpus → send it whole; big corpus → retrieve top-k), **failing open** to exact M5
+    behaviour if the index is down, and **never voting on the paper** — Qdrant is a rebuildable
+    index, MySQL stays the source of truth, and the deterministic algorithm keeps every selection
+    decision. I can show it catching the LLM repeating itself at 99.8% similarity in the logs."*
 
 ---
 
@@ -856,6 +957,25 @@ framing.
 8. **Stale docblock in `PaperController::generate`** (says `used_count` isn't incremented; the code
    increments it). *Answer:* "A leftover comment from M2; the behavior is correct and matches M3.
    Repetition control doesn't depend on that column anyway — it's derived from `paper_questions`."
+
+9. **Semantic dedup is threshold-based, not a guarantee (M6).**
+   *Answer:* "Cosine ≥ 0.90 is an empirical net: paraphrases usually score 0.93+, but a heavy-enough
+   rewording at 0.87 slips through, and lowering the bar starts rejecting legitimately different
+   questions on the same topic ('Define TCP' vs 'Define UDP' territory). The threshold is env-tunable
+   (`RAG_DUPLICATE_THRESHOLD`), the drops are logged with their scores for audit, and the safety
+   asymmetry is deliberate — auto-drop only in the automated pipeline, flag-only where a human
+   reviews. Also honest: RAG **fails open** — if Qdrant or the embedder is down, expansion degrades
+   to exact-text dedup, so a paraphrase *could* enter during an outage; `qforge:rag:reindex` and the
+   review of `source=ai` questions is the recovery path."
+
+10. **The embedding model is fixed and English-only, and Qdrant is extra infrastructure.**
+    *Answer:* "`nomic-embed-text` was a deliberate pick for an English CS corpus; the model name is
+    stamped on every stored vector, so a swap (e.g. multilingual `bge-m3`) is detectable and handled
+    by one `--fresh` re-index — vectors from different models are incomparable by design, and the
+    system knows it. On Qdrant: at current scale brute-force cosine in PHP would have worked, and I
+    can defend that trade — I chose the real tool for payload-filtered search and headroom, but it's
+    an *index*, rebuildable from MySQL in one command, so it adds an operational dependency without
+    adding a source of truth."
 
 ---
 
@@ -993,9 +1113,14 @@ wrong guess.
 ### AI / Python (3)
 
 **Q17. Is this RAG? Where are the embeddings?**
-There are no embeddings or vector store. `GroundingBuilder` does **deterministic SQL retrieval by
-primary key** — the subject syllabus, the unit's content, and up to 3 approved exemplars. It's
-"grounding," assembled in Laravel; Python just wraps it in a prompt and calls the model.
+Since M6, yes — real RAG. Embeddings come from `nomic-embed-text` (768 dims, served by the same
+Ollama container) via Python's `POST /embed`; the vectors live in **Qdrant** (two collections:
+`questions` and `chunks`, cosine distance, point id = MySQL row id). `GroundingBuilder` embeds a
+natural-language *slot query* and retrieves by similarity — but with a **budget-based hybrid**:
+when the whole corpus fits ~1500 tokens it's sent whole (complete context beats excerpts of a small
+corpus), over that it's the top-k nearest chunks. Retrieval stays in **Laravel**; Python only
+embeds and generates. *(Before M6 the honest answer was "no — SQL by primary key"; if the examiner
+read an old draft, own the evolution: M5 grounding was the scaffold, M6 made it semantic.)*
 
 **Q18. What if the LLM returns garbage or is down?**
 `OllamaProvider._coerce_items` tolerantly parses the JSON (a garbled response degrades to "generated
@@ -1018,6 +1143,44 @@ logs a warning if the model echoed a mismatch). Units come from `MissingSlot.uni
 the first (scarcest) target, the full set tagged via `syncUnitLinks`; the Python response schema
 has no unit field at all, so there is nothing to parse back. The model's output is treated as
 *text only*.
+
+### RAG / M6 (5)
+
+**Q19a. What is an embedding, in one sentence, and why cosine similarity?**
+A fixed-length vector (768 numbers here) a small neural model produces from text, trained so that
+**similar meaning lands close together** — a "map of meaning". Cosine measures the *angle* between
+two vectors, ignoring length, so a one-line question and a paragraph on the same topic still score
+as near — that one operation powers dedup ("is any bank question ≥ 0.90 to this?"), grounding
+retrieval ("which chunks are nearest this slot?"), and unit suggestion ("which unit's content is
+nearest this question?").
+
+**Q19b. Why Qdrant and not pgvector / MySQL / brute force?**
+MySQL has no usable vector index, and at current scale brute-force cosine in PHP would actually
+work — I say that openly. Qdrant buys payload-filtered ANN search ("nearest *within subject 3,
+approved only*" in one call) and scale headroom, at the cost of one container. The discipline that
+makes it safe: **Qdrant is an index, not a database** — every vector derives from a MySQL row, and
+`artisan qforge:rag:reindex --fresh` rebuilds it from scratch, so it can never hold hostage data.
+
+**Q19c. Why doesn't the paper generator use similarity — two similar questions could land on one paper?**
+Deliberate layering: RAG is **bank hygiene** (AI near-dupes never enter; extracted lookalikes are
+flagged for the reviewer), and the paper generator stays deterministic with by-id repeat checks. If
+duplicates can't get *into* the bank, the algorithm doesn't need to dodge them — fix the disease,
+not the symptom. Two *human-approved* similar questions can still co-occur; a paper-level semantic
+diversity constraint is cheap future work (the vectors already exist) but it would change the
+centerpiece algorithm's semantics, so it's out of scope by choice.
+
+**Q19d. The LLM will still generate duplicates though — right?**
+Yes — the model has no memory of the bank; we filter *after* generation, not prevent. Two layers in
+`storeSurvivors`: normalized-text (verbatim repeats) then embedding similarity ≥ 0.90 against the
+indexed bank *and* this run's earlier survivors. Live evidence in the logs: the model regenerated
+its own data-cube and Apriori questions at **0.9979 / 0.9788** — both dropped. The one-liner: *the
+LLM may repeat itself; the bank won't* — up to the threshold, while the index is healthy.
+
+**Q19e. What happens to all of this when Qdrant or the embedding model is down?**
+Everything **fails open** behind one switch (`RAG_ENABLED`) and try/catch at each seam: expansion
+falls back to exact-text dedup and M5-style full-content grounding (the grounding `notes` log why),
+extraction skips its annotations, and no upload/expansion/approval ever errors because the index is
+sick. Recovery is one command: `qforge:rag:reindex`.
 
 ### General / "why did you build it this way" (3)
 
@@ -1058,9 +1221,14 @@ abstraction, the queue, the review queue).
 | 11 | Communication rule | Frontend → Laravel → Python → Laravel → Frontend (browser never calls Python) |
 | 12 | AI model + provider | Ollama `qwen2.5:3b-instruct` via `LLMProvider` (`OllamaProvider` + `StubProvider`) |
 | 13 | What AI decides / doesn't | Decides: question *text*. Doesn't: type, marks, units (told in the prompt, never parsed back), selection, or DB writes |
-| 14 | Queue stack | Redis + Horizon; jobs `ProcessDocumentUpload`, `ExpandQuestionBank` |
-| 15 | Milestone status | M1–M5 (incl. M3.1, M4.1) + Post-M5 (multi-unit) + Post-M5.1 (coverage-aware greedy, unit maximums, multi-unit AI top-up) all **Done**; 161 Laravel tests, 147 pytest green per the milestone log |
+| 14 | Queue stack | Redis + Horizon; jobs `ProcessDocumentUpload`, `ExpandQuestionBank`, `SyncQuestionEmbedding`, `SyncSubjectChunks` (M6) |
+| 15 | Milestone status | M1–M6 (incl. M3.1, M4.1, Post-M5, Post-M5.1) all **Done**; 198 Laravel tests, 153 pytest green per the milestone log |
 | 16 | Past-paper marks signals (priority) | Brackets `[2+8]` → word "marks" → trailing paren `(2+8)` → section directive `[10×5=50]` per-question default (explicit wins; default resets each section; OCR `I→1` fold inside tokens) |
+| 17 | RAG stack (M6) | Embeddings: `nomic-embed-text` (768-dim) via Python `POST /embed`; vector DB: **Qdrant** (collections `questions` + `chunks`, cosine, point id = MySQL row id); Laravel-only access — an **index, not a database** |
+| 18 | RAG's three uses | ① Semantic dedup in AI expansion (auto-drop ≥ 0.90, `DuplicateDetector`) ② hybrid grounding (`GroundingBuilder`: full ≤ 6000 chars, else top-k chunks + semantic top-3 exemplars) ③ review-queue hints (`similar` flag + 💡 unit suggestions, floor 0.50, suggest-only) |
+| 19 | RAG folder + rebuild | `code/app/Services/Rag/`; rebuild everything: `artisan qforge:rag:reindex --fresh`; master switch `RAG_ENABLED` (fails open to M5 behavior) |
+| 20 | RAG boundary (one line) | *"The LLM may repeat itself; the bank won't. Retrieval feeds the prompt and the bank — never the paper; selection stays deterministic."* |
+| 21 | RAG live evidence | Model repeated its own questions at **0.9979 / 0.9788** → both auto-dropped (worker log); paraphrase of a bank question scored **0.989** vs next-best 0.765; SWOT question → "Planning and Decision Making" suggested at **0.751** |
 
 ---
 
