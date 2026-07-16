@@ -1,46 +1,54 @@
 <script setup lang="ts">
+import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { QFAIHint, QFBadge, QFButton, QFCard, QFPageHeader } from '../../components/qf';
+import { QFBadge, QFButton, QFCard, QFEmptyState, QFPageHeader, QFSpinner } from '../../components/qf';
+import { useAdminOverviewStore } from '../../stores/adminOverview';
+import type { ActivityType } from '../../stores/adminOverview';
+import type { UploadStatus } from '../../stores/extraction';
 
 const router = useRouter();
+const overview = useAdminOverviewStore();
 
-const stats = [
-  { label: 'Total Questions', value: '4,821', sub: '+127 this week', color: 'var(--cyan)', icon: '◈' },
-  { label: 'Documents Processed', value: '63', sub: '12 pending review', color: 'var(--indigo)', icon: '⬡' },
-  { label: 'Active Teachers', value: '18', sub: '3 online now', color: 'var(--success)', icon: '◉' },
-  { label: 'Papers Generated', value: '241', sub: 'this semester', color: 'var(--warn)', icon: '✦' },
-];
+const stats = computed(() => {
+  const s = overview.stats;
+  return [
+    { label: 'Total Questions', value: s.questionsTotal, sub: `+${s.questionsThisWeek} this week`, color: 'var(--cyan)', icon: '◈' },
+    { label: 'Documents Processed', value: s.documentsTotal, sub: `${s.questionsPending} pending review`, color: 'var(--indigo)', icon: '⬡' },
+    { label: 'Active Teachers', value: s.teachersTotal, sub: `${s.usersTotal} users total`, color: 'var(--success)', icon: '◉' },
+    { label: 'Papers Generated', value: s.papersGenerated, sub: 'all-time', color: 'var(--warn)', icon: '✦' },
+  ];
+});
 
-const recent: Array<{
-  name: string;
-  subject: string;
-  questions: number | null;
-  status: 'processed' | 'processing' | 'review';
-  time: string;
-}> = [
-  { name: 'DataStructures_2024.pdf', subject: 'CS301', questions: 47, status: 'processed', time: '2h ago' },
-  { name: 'Algorithms_PastPapers.pdf', subject: 'CS302', questions: null, status: 'processing', time: '20m ago' },
-  { name: 'NetworkingSyllabus.pdf', subject: 'CS401', questions: 31, status: 'review', time: '1d ago' },
-  { name: 'DBMS_Finals_2023.pdf', subject: 'CS303', questions: 55, status: 'processed', time: '2d ago' },
-];
-
-const activity = [
-  { action: 'Paper generated', detail: 'Advanced Math Final — 28 questions', time: '5m ago', icon: '✦', color: 'var(--cyan)' },
-  { action: 'Questions approved', detail: '42 questions from DBMS Past Papers', time: '1h ago', icon: '◈', color: 'var(--success)' },
-  { action: 'Blueprint created', detail: '"Short Quiz Template" by Dr. Patel', time: '3h ago', icon: '⬡', color: 'var(--indigo)' },
-  { action: 'PDF uploaded', detail: 'Algorithms_PastPapers.pdf', time: '4h ago', icon: '⬆', color: 'var(--warn)' },
-  { action: 'User added', detail: 'Prof. Maria Chen — Teacher role', time: '1d ago', icon: '◉', color: 'var(--text3)' },
-];
-
-const statusMap: Record<string, { v: 'success' | 'warn' | 'indigo'; l: string }> = {
-  processed: { v: 'success', l: 'Processed' },
+const statusMap: Record<UploadStatus, { v: 'success' | 'warn' | 'indigo' | 'danger'; l: string }> = {
+  parsed: { v: 'success', l: 'Processed' },
   processing: { v: 'warn', l: 'Processing…' },
-  review: { v: 'indigo', l: 'Needs Review' },
+  uploaded: { v: 'indigo', l: 'Queued' },
+  failed: { v: 'danger', l: 'Failed' },
 };
 
-const rowClick = (status: string) => {
-  router.push(status === 'review' ? '/admin/review' : '/admin/upload');
+const activityStyle: Record<ActivityType, { icon: string; color: string }> = {
+  upload: { icon: '⬆', color: 'var(--warn)' },
+  paper: { icon: '✦', color: 'var(--cyan)' },
+  user: { icon: '◉', color: 'var(--success)' },
 };
+
+// Compact "time ago" for ISO timestamps (e.g. "2h ago", "3d ago").
+const timeAgo = (iso: string): string => {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return `${d}d ago`;
+};
+
+const rowClick = () => router.push('/admin/upload');
+
+onMounted(() => overview.fetch());
 </script>
 
 <template>
@@ -67,7 +75,7 @@ const rowClick = (status: string) => {
           <div class="qf-stat-label">{{ s.label }}</div>
           <div :style="{ color: s.color }" class="text-xl">{{ s.icon }}</div>
         </div>
-        <div class="qf-stat-value" :style="{ color: s.color }">{{ s.value }}</div>
+        <div class="qf-stat-value" :style="{ color: s.color }">{{ s.value.toLocaleString() }}</div>
         <div class="qf-stat-sub">{{ s.sub }}</div>
       </div>
     </div>
@@ -81,7 +89,17 @@ const rowClick = (status: string) => {
           <span style="font-family: var(--font-head); font-weight: 600">Recent Documents</span>
           <QFButton variant="ghost" size="sm" @click="router.push('/admin/upload')">View all →</QFButton>
         </div>
-        <div class="qf-table-wrap">
+
+        <div v-if="overview.loading && overview.recentUploads.length === 0" class="flex justify-center py-8">
+          <QFSpinner />
+        </div>
+        <QFEmptyState
+          v-else-if="overview.recentUploads.length === 0"
+          icon="📄"
+          title="No documents yet"
+          desc="Uploaded PDFs will appear here once processed."
+        />
+        <div v-else class="qf-table-wrap">
           <table class="qf-table">
             <thead>
               <tr>
@@ -94,25 +112,23 @@ const rowClick = (status: string) => {
             </thead>
             <tbody>
               <tr
-                v-for="r in recent"
-                :key="r.name"
+                v-for="r in overview.recentUploads"
+                :key="r.id"
                 class="cursor-pointer"
-                @click="rowClick(r.status)"
+                @click="rowClick()"
               >
                 <td>
-                  <div class="font-medium text-[13px]">{{ r.name }}</div>
+                  <div class="font-medium text-[13px]">{{ r.filename }}</div>
                 </td>
                 <td>
-                  <span class="font-mono text-xs text-text2">
-                    {{ r.subject }}
-                  </span>
+                  <span class="font-mono text-xs text-text2">{{ r.subjectCode ?? '—' }}</span>
                 </td>
                 <td>
-                  <template v-if="r.questions !== null">{{ r.questions }}</template>
+                  <template v-if="r.questionsCreated !== null">{{ r.questionsCreated }}</template>
                   <span v-else class="text-text3">—</span>
                 </td>
                 <td><QFBadge :variant="statusMap[r.status].v">{{ statusMap[r.status].l }}</QFBadge></td>
-                <td class="text-text3 text-xs">{{ r.time }}</td>
+                <td class="text-text3 text-xs">{{ timeAgo(r.createdAt) }}</td>
               </tr>
             </tbody>
           </table>
@@ -124,34 +140,43 @@ const rowClick = (status: string) => {
           <span style="font-family: var(--font-head); font-weight: 600">Activity Feed</span>
         </div>
         <div class="qf-card-body" style="padding-top: 0">
-          <div style="display: flex; flex-direction: column; gap: 0">
+          <div v-if="overview.loading && overview.activity.length === 0" class="flex justify-center py-8">
+            <QFSpinner />
+          </div>
+          <QFEmptyState
+            v-else-if="overview.activity.length === 0"
+            icon="✦"
+            title="No activity yet"
+            desc="Recent uploads, papers, and users will show up here."
+          />
+          <div v-else style="display: flex; flex-direction: column; gap: 0">
             <div
-              v-for="(a, i) in activity"
+              v-for="(a, i) in overview.activity"
               :key="i"
               :style="{
                 display: 'flex',
                 gap: '12px',
                 padding: '12px 0',
-                borderBottom: i < activity.length - 1 ? '1px solid var(--border)' : 'none',
+                borderBottom: i < overview.activity.length - 1 ? '1px solid var(--border)' : 'none',
               }"
             >
               <div
                 :style="{
                   width: '28px',
                   height: '28px',
-                  background: `${a.color}18`,
+                  background: `${activityStyle[a.type].color}18`,
                   borderRadius: '8px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: '12px',
-                  color: a.color,
+                  color: activityStyle[a.type].color,
                   flexShrink: 0,
                   marginTop: '1px',
                 }"
-              >{{ a.icon }}</div>
+              >{{ activityStyle[a.type].icon }}</div>
               <div style="flex: 1; min-width: 0">
-                <div style="font-size: 13px; font-weight: 500; color: var(--text)">{{ a.action }}</div>
+                <div style="font-size: 13px; font-weight: 500; color: var(--text)">{{ a.title }}</div>
                 <div
                   style="
                     font-size: 12px;
@@ -162,18 +187,12 @@ const rowClick = (status: string) => {
                     white-space: nowrap;
                   "
                 >{{ a.detail }}</div>
-                <div style="font-size: 11px; color: var(--text3); margin-top: 3px">{{ a.time }}</div>
+                <div style="font-size: 11px; color: var(--text3); margin-top: 3px">{{ timeAgo(a.at) }}</div>
               </div>
             </div>
           </div>
         </div>
       </QFCard>
-    </div>
-
-    <div class="mt-5">
-      <QFAIHint>
-        <strong style="color: var(--ai)">AI Insight:</strong> Unit 3 (Graph Algorithms) in CS302 has only 8 questions — below the recommended minimum of 15 for adequate blueprint coverage. Consider uploading more past papers for this unit.
-      </QFAIHint>
     </div>
   </div>
 </template>

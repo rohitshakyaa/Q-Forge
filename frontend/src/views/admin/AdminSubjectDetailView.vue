@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   QFAIHint,
@@ -10,6 +10,7 @@ import {
   QFInput,
   QFModal,
   QFPageHeader,
+  QFProgress,
   QFSelect,
 } from '../../components/qf';
 import {
@@ -18,10 +19,12 @@ import {
   type CatalogUnit,
   type Subject,
 } from '../../stores/catalog';
+import { useExtractionStore } from '../../stores/extraction';
 
 const route = useRoute();
 const router = useRouter();
 const catalog = useCatalogStore();
+const extraction = useExtractionStore();
 
 const code = computed(() => String(route.params.code ?? ''));
 const subject = computed<Subject | null>(() =>
@@ -140,10 +143,65 @@ const saveQuestion = async () => {
 };
 
 const uploadDragover = ref(false);
+const syllabusFileInput = ref<HTMLInputElement | null>(null);
+const syllabusUploadId = ref<number | null>(null);
+const syllabusError = ref<string | null>(null);
 
-const simulateSyllabusUpload = () => {
-  syllabusMode.value = 'view';
+// The store owns polling; we just track which upload is ours and read its live status.
+const syllabusUpload = computed(() =>
+  syllabusUploadId.value === null
+    ? null
+    : extraction.uploads.find((u) => u.id === syllabusUploadId.value) ?? null,
+);
+
+const uploadSyllabus = async (file: File) => {
+  if (!subject.value?.id) return;
+  syllabusError.value = null;
+  try {
+    const upload = await extraction.createUpload({
+      file,
+      type: 'syllabus',
+      subjectId: subject.value.id,
+    });
+    syllabusUploadId.value = upload.id;
+  } catch (e: unknown) {
+    const response = (e as { response?: { data?: { message?: string } } }).response;
+    syllabusError.value = response?.data?.message ?? 'Upload failed.';
+  }
 };
+
+const onSyllabusPick = (e: Event) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) uploadSyllabus(file);
+  input.value = ''; // Allow re-picking the same file.
+};
+
+const onSyllabusDrop = (e: DragEvent) => {
+  uploadDragover.value = false;
+  const file = e.dataTransfer?.files?.[0];
+  if (file) uploadSyllabus(file);
+};
+
+// Once the queued extraction finishes, hand off to the pinned import-review screen for
+// this subject; surface failures inline and let the user retry.
+watch(
+  () => syllabusUpload.value?.status,
+  (status) => {
+    if (status === 'parsed') {
+      const id = syllabusUploadId.value;
+      syllabusUploadId.value = null;
+      router.push(`/admin/syllabus/${id}?subject=${code.value}`);
+    } else if (status === 'failed') {
+      syllabusError.value = syllabusUpload.value?.error ?? 'Extraction failed.';
+      syllabusUploadId.value = null;
+    }
+  },
+);
+
+onUnmounted(() => {
+  if (syllabusUploadId.value !== null) extraction.stopWatching(syllabusUploadId.value);
+});
 
 const saveSyllabus = async () => {
   if (!subject.value) return;
@@ -408,27 +466,57 @@ const diffColor: Record<string, string> = {
             </div>
           </div>
         </QFCard>
-        <div
-          v-else
-          :class="['qf-dropzone', uploadDragover && 'dragover']"
-          @dragover.prevent="uploadDragover = true"
-          @dragleave="uploadDragover = false"
-          @drop.prevent="uploadDragover = false; simulateSyllabusUpload()"
-          @click="simulateSyllabusUpload"
-        >
-          <div style="font-size: 36px; opacity: 0.5">⬆</div>
-          <div
-            style="
-              font-family: var(--font-head);
-              font-size: 16px;
-              font-weight: 600;
-              color: var(--text2);
-            "
-          >Upload syllabus PDF</div>
-          <div style="font-size: 13px; color: var(--text3)">
-            We'll auto-extract units and learning outcomes
+        <div v-else>
+          <input
+            ref="syllabusFileInput"
+            type="file"
+            accept="application/pdf"
+            style="display: none"
+            @change="onSyllabusPick"
+          />
+
+          <div v-if="syllabusError" style="margin-bottom: 12px; font-size: 13px; color: var(--danger)">
+            {{ syllabusError }}
           </div>
-          <QFButton variant="secondary" size="sm">Browse files</QFButton>
+
+          <QFCard v-if="syllabusUpload && !extraction.isTerminal(syllabusUpload.status)">
+            <div class="qf-card-body">
+              <div style="font-weight: 500; font-size: 13.5px; margin-bottom: 10px">
+                {{ syllabusUpload.filename }}
+              </div>
+              <QFProgress
+                :value="syllabusUpload.progress"
+                ai
+                :label="`Extracting units… ${syllabusUpload.progress}%`"
+              />
+              <div style="margin-top: 8px; font-size: 12px; color: var(--text3)">
+                You'll be taken to the review screen automatically once extraction finishes.
+              </div>
+            </div>
+          </QFCard>
+
+          <div
+            v-else
+            :class="['qf-dropzone', uploadDragover && 'dragover']"
+            @dragover.prevent="uploadDragover = true"
+            @dragleave="uploadDragover = false"
+            @drop.prevent="onSyllabusDrop"
+            @click="syllabusFileInput?.click()"
+          >
+            <div style="font-size: 36px; opacity: 0.5">⬆</div>
+            <div
+              style="
+                font-family: var(--font-head);
+                font-size: 16px;
+                font-weight: 600;
+                color: var(--text2);
+              "
+            >Upload syllabus PDF</div>
+            <div style="font-size: 13px; color: var(--text3)">
+              We'll auto-extract units and learning outcomes · PDF only
+            </div>
+            <QFButton variant="secondary" size="sm">Browse files</QFButton>
+          </div>
         </div>
       </div>
 

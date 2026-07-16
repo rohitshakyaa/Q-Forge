@@ -175,16 +175,24 @@ class SyllabusImportTest extends TestCase
         $this->assertSame(99, $unit->hours);
     }
 
-    public function test_an_existing_subjects_details_are_untouched_by_default(): void
+    public function test_an_existing_subjects_name_and_description_stay_but_its_syllabus_refreshes(): void
     {
-        Subject::factory()->create(['code' => 'CSC365', 'name' => 'Teacher-owned name', 'syllabus' => null]);
+        Subject::factory()->create([
+            'code' => 'CSC365',
+            'name' => 'Teacher-owned name',
+            'description' => 'Teacher-owned description',
+            'syllabus' => 'An old syllabus corpus.',
+        ]);
         $upload = $this->syllabusUpload();
 
         $this->postJson("/api/uploads/{$upload->id}/import", $this->payload())->assertOk();
 
         $subject = Subject::sole();
+        // Name and description are the teacher's catalog identity — untouched without opt-in.
         $this->assertSame('Teacher-owned name', $subject->name);
-        $this->assertNull($subject->syllabus);
+        $this->assertSame('Teacher-owned description', $subject->description);
+        // The uploaded document is the syllabus, so its corpus always refreshes.
+        $this->assertStringContainsString('# Compiler Design', $subject->syllabus);
     }
 
     public function test_update_existing_refreshes_the_subject_details(): void

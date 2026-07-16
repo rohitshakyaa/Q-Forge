@@ -28,6 +28,14 @@ class ExpandQuestionBank implements ShouldQueue
     /** A single bad item shouldn't re-trigger infeasibility, so over-ask by this much. */
     private const BUFFER = 2;
 
+    /**
+     * A small local model routinely returns fewer questions than requested (asked for
+     * 12, hands back 6), so one call rarely closes a deficit. Re-ask, requesting only
+     * the shortfall each round, until the slot is filled — capped so a model that keeps
+     * under-delivering (or repeating itself) can't loop forever.
+     */
+    private const MAX_ATTEMPTS_PER_SLOT = 3;
+
     public int $tries = 2;
 
     public int $timeout = 600;
@@ -38,8 +46,7 @@ class ExpandQuestionBank implements ShouldQueue
     public function __construct(
         public readonly int $blueprintId,
         public readonly array $slots,
-    ) {
-    }
+    ) {}
 
     public function handle(PythonService $python, GroundingBuilder $grounding): void
     {
@@ -55,37 +62,61 @@ class ExpandQuestionBank implements ShouldQueue
         $totalStored = 0;
 
         foreach ($this->slots as $slot) {
-            $type = $slot['type'];
-            $marks = (int) $slot['marks'];
-            $unitId = $slot['unit_id'] ?? null;
-            $need = max(1, (int) $slot['need']);
+            $totalStored += $this->fillSlot($python, $grounding, $blueprint, $slot);
+        }
 
-            $unit = $unitId !== null ? Unit::find($unitId) : null;
+        Log::info('ExpandQuestionBank: complete', [
+            'blueprint' => $blueprint->id, 'slots' => count($this->slots), 'stored' => $totalStored,
+        ]);
+    }
 
-            $block = $grounding->for($subject, $unit, $type, $marks);
-            foreach ($block['notes'] as $note) {
-                Log::info("ExpandQuestionBank: grounding note — {$note}", [
-                    'blueprint' => $blueprint->id, 'unit_id' => $unitId, 'type' => $type,
-                ]);
-            }
+    /**
+     * Top up a single missing slot, re-asking the model until the shortfall is filled,
+     * an attempt round adds nothing new (the model has run out of distinct questions),
+     * or the attempt cap is hit. Each round requests only the *remaining* need so the
+     * bank isn't over-inflated once the deficit is closed. Returns the count stored.
+     *
+     * @param  array{section_label:string, type:string, marks:int, unit_id:?int, need:int}  $slot
+     */
+    private function fillSlot(PythonService $python, GroundingBuilder $grounding, Blueprint $blueprint, array $slot): int
+    {
+        $subject = $blueprint->subject;
+        $type = $slot['type'];
+        $marks = (int) $slot['marks'];
+        $unitId = $slot['unit_id'] ?? null;
+        $need = max(1, (int) $slot['need']);
 
-            // The grounding block Laravel assembled and handed to Python. The exact
-            // wrapped prompt + raw model output live in the Python logs (LLM_DEBUG=1).
-            Log::debug('ExpandQuestionBank: grounding block sent to Python', [
-                'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
-                'unit_id' => $unitId, 'requested' => $need + self::BUFFER,
-                'grounding' => $block['text'],
+        $unit = $unitId !== null ? Unit::find($unitId) : null;
+
+        // Grounding is deterministic for a (subject, unit, type, marks) tuple, so build it
+        // once and reuse it across retry rounds.
+        $block = $grounding->for($subject, $unit, $type, $marks);
+        foreach ($block['notes'] as $note) {
+            Log::info("ExpandQuestionBank: grounding note — {$note}", [
+                'blueprint' => $blueprint->id, 'unit_id' => $unitId, 'type' => $type,
             ]);
+        }
+
+        // The grounding block Laravel assembled and handed to Python. The exact
+        // wrapped prompt + raw model output live in the Python logs (LLM_DEBUG=1).
+        Log::debug('ExpandQuestionBank: grounding block sent to Python', [
+            'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
+            'unit_id' => $unitId, 'grounding' => $block['text'],
+        ]);
+
+        $stored = 0;
+        for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS_PER_SLOT && $stored < $need; $attempt++) {
+            $requested = ($need - $stored) + self::BUFFER;
 
             try {
-                $result = $python->generateQuestions($block['text'], $type, $marks, $need + self::BUFFER);
+                $result = $python->generateQuestions($block['text'], $type, $marks, $requested);
             } catch (\RuntimeException $e) {
                 Log::error('ExpandQuestionBank: generation failed for slot', [
                     'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
-                    'unit_id' => $unitId, 'error' => $e->getMessage(),
+                    'unit_id' => $unitId, 'attempt' => $attempt, 'error' => $e->getMessage(),
                 ]);
 
-                continue; // Other slots may still succeed.
+                break; // Give up on this slot; other slots may still succeed.
             }
 
             foreach ($result['errors'] as $error) {
@@ -94,22 +125,32 @@ class ExpandQuestionBank implements ShouldQueue
 
             Log::debug('ExpandQuestionBank: questions returned from Python', [
                 'blueprint' => $blueprint->id, 'type' => $type, 'unit_id' => $unitId,
-                'data' => $result['data'], 'errors' => $result['errors'],
+                'attempt' => $attempt, 'data' => $result['data'], 'errors' => $result['errors'],
             ]);
 
-            $stored = $this->storeSurvivors($subject->id, $unitId, $type, $marks, $result['data']);
-            $totalStored += $stored;
+            $added = $this->storeSurvivors($subject->id, $unitId, $type, $marks, $result['data']);
+            $stored += $added;
 
-            Log::info('ExpandQuestionBank: slot topped up', [
+            Log::info('ExpandQuestionBank: slot attempt', [
                 'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
-                'unit_id' => $unitId, 'need' => $need, 'requested' => $need + self::BUFFER,
-                'stored' => $stored, 'rejected' => count($result['errors']),
+                'unit_id' => $unitId, 'attempt' => $attempt, 'need' => $need,
+                'requested' => $requested, 'added' => $added, 'stored_so_far' => $stored,
+                'rejected' => count($result['errors']),
             ]);
+
+            // Nothing new landed — the model is repeating itself or can't produce more;
+            // further identical requests won't help, so stop wasting LLM calls.
+            if ($added === 0) {
+                break;
+            }
         }
 
-        Log::info('ExpandQuestionBank: complete', [
-            'blueprint' => $blueprint->id, 'slots' => count($this->slots), 'stored' => $totalStored,
+        Log::info('ExpandQuestionBank: slot topped up', [
+            'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
+            'unit_id' => $unitId, 'need' => $need, 'stored' => $stored, 'filled' => $stored >= $need,
         ]);
+
+        return $stored;
     }
 
     /**
@@ -122,6 +163,16 @@ class ExpandQuestionBank implements ShouldQueue
      */
     private function storeSurvivors(int $subjectId, ?int $unitId, string $type, int $marks, array $candidates): int
     {
+        // Text-based dedup across retry rounds: a small local model tends to repeat
+        // itself, and near-identical rows would satisfy the count while producing a
+        // paper with duplicated wording (the "no repeated questions" rule is by id, so
+        // it can't catch them). Seed the seen-set from the existing bank — which already
+        // includes rows earlier rounds of this job inserted — then grow it as we store.
+        $seen = Question::where('subject_id', $subjectId)
+            ->pluck('text')
+            ->mapWithKeys(fn ($t) => [$this->normalize((string) $t) => true])
+            ->all();
+
         $stored = 0;
 
         foreach ($candidates as $candidate) {
@@ -129,6 +180,12 @@ class ExpandQuestionBank implements ShouldQueue
             if ($text === '') {
                 continue; // Defensive: Python already filters these.
             }
+
+            $key = $this->normalize($text);
+            if (isset($seen[$key])) {
+                continue; // Duplicate of an existing or just-stored question.
+            }
+            $seen[$key] = true;
 
             if (($candidate['type'] ?? $type) !== $type || (int) ($candidate['marks'] ?? $marks) !== $marks) {
                 Log::warning('ExpandQuestionBank: model echoed a mismatched type/marks; stamping the slot values', [
@@ -162,5 +219,11 @@ class ExpandQuestionBank implements ShouldQueue
         }
 
         return $stored;
+    }
+
+    /** Fold a question's text to a canonical form for duplicate detection. */
+    private function normalize(string $text): string
+    {
+        return preg_replace('/\s+/', ' ', mb_strtolower(trim($text)));
     }
 }

@@ -5,11 +5,20 @@ import { QFBadge, QFButton, QFPageHeader } from '../../components/qf';
 import { useBlueprintsStore } from '../../stores/blueprints';
 import { usePapersStore } from '../../stores/papers';
 import { useCatalogStore } from '../../stores/catalog';
+import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
 const blueprintsStore = useBlueprintsStore();
 const papersStore = usePapersStore();
 const catalogStore = useCatalogStore();
+const authStore = useAuthStore();
+
+const greeting = computed(() => {
+  const h = new Date().getHours();
+  const partOfDay = h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening';
+  const name = authStore.user?.name ?? 'there';
+  return `Good ${partOfDay}, ${name} — ready to generate today's paper?`;
+});
 
 const quickActions = [
   { icon: '⬡', label: 'Blueprints', desc: 'Browse and manage paper templates', color: 'var(--cyan)', to: '/teacher/blueprint' },
@@ -29,14 +38,27 @@ const stats = computed(() => {
   const papers = papersStore.list;
   const totalExports = papers.reduce((s, p) => s + p.exports, 0);
   const totalMarks = papers.reduce((s, p) => s + p.marks, 0);
+  // Question-bank size comes from the subjects index (teacher-accessible); the
+  // per-question catalog endpoint is admin-only, so questionBank is never
+  // hydrated for a teacher.
+  const questions = catalogStore.subjects.reduce((s, sub) => s + (sub.questionsCount ?? 0), 0);
   return {
     papers: papers.length,
     blueprints: blueprintsStore.list.length,
-    questions: catalogStore.questionBank.length,
+    questions,
     subjects: catalogStore.subjects.length,
     exports: totalExports,
     marks: totalMarks,
   };
+});
+
+const questionsBySubject = computed(() => {
+  const arr = catalogStore.subjects
+    .map((s) => ({ subject: s.code, count: s.questionsCount ?? 0 }))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const max = Math.max(1, ...arr.map((r) => r.count));
+  return arr.map((r) => ({ ...r, pct: Math.round((r.count / max) * 100) }));
 });
 
 const subjectBreakdown = computed(() => {
@@ -63,18 +85,6 @@ const statusBreakdown = computed(() => {
   ];
 });
 
-const difficultyBreakdown = computed(() => {
-  const counts: Record<'Easy' | 'Medium' | 'Hard', number> = { Easy: 0, Medium: 0, Hard: 0 };
-  for (const q of catalogStore.questionBank) {
-    if (q.difficulty) counts[q.difficulty] += 1;
-  }
-  return [
-    { label: 'Easy', count: counts.Easy, color: 'var(--success)' },
-    { label: 'Medium', count: counts.Medium, color: 'var(--warn)' },
-    { label: 'Hard', count: counts.Hard, color: 'var(--danger)' },
-  ];
-});
-
 const setHover = (e: MouseEvent, color: string, enter: boolean) => {
   const el = e.currentTarget as HTMLElement;
   el.style.borderColor = enter ? color : 'var(--border)';
@@ -86,15 +96,20 @@ const setListHover = (e: MouseEvent, enter: boolean) => {
   el.style.borderColor = enter ? 'var(--border2)' : 'var(--border)';
 };
 
-// Hydrate recent papers + stats from the live history endpoint.
-onMounted(() => papersStore.fetchHistory());
+// Hydrate everything the dashboard reads so a direct visit is correct — the
+// stores are otherwise populated only by the pages that own them.
+onMounted(() => {
+  papersStore.fetchHistory();
+  if (blueprintsStore.list.length === 0) blueprintsStore.fetch();
+  if (catalogStore.subjects.length === 0) catalogStore.fetchSubjects();
+});
 </script>
 
 <template>
   <div class="qf-content qf-anim-in">
     <QFPageHeader
       title="Teacher Dashboard"
-      subtitle="Good morning, Dr. Johnson — ready to generate today's paper?"
+      :subtitle="greeting"
       :breadcrumbs="[{ label: 'Dashboard' }]"
     />
 
@@ -281,26 +296,26 @@ onMounted(() => papersStore.fetchHistory());
           "
         >
           <div style="font-family: var(--font-head); font-weight: 600; font-size: 14px; margin-bottom: 14px">
-            Question Bank
+            Questions by Subject
           </div>
-          <div style="display: flex; gap: 10px">
-            <div
-              v-for="d in difficultyBreakdown"
-              :key="d.label"
-              style="
-                flex: 1;
-                background: var(--bg2);
-                border: 1px solid var(--border);
-                border-radius: 10px;
-                padding: 10px 8px;
-                text-align: center;
-              "
-            >
-              <div :style="{ color: d.color, fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '18px', lineHeight: 1 }">
-                {{ d.count }}
+          <div v-if="questionsBySubject.length === 0" style="font-size: 12.5px; color: var(--text3)">
+            No questions yet.
+          </div>
+          <div v-else style="display: flex; flex-direction: column; gap: 12px">
+            <div v-for="row in questionsBySubject" :key="row.subject">
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px">
+                <span style="color: var(--cyan); font-family: var(--font-mono)">{{ row.subject }}</span>
+                <span style="color: var(--text2)">{{ row.count }} question{{ row.count === 1 ? '' : 's' }}</span>
               </div>
-              <div style="font-size: 10.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px">
-                {{ d.label }}
+              <div style="height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden">
+                <div
+                  :style="{
+                    width: `${row.pct}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, var(--indigo), var(--cyan))',
+                    borderRadius: '3px',
+                  }"
+                />
               </div>
             </div>
           </div>

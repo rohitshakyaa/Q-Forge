@@ -162,6 +162,68 @@ class BankExpansionTest extends TestCase
             ->assertJsonPath('satisfiable', true);
     }
 
+    public function test_job_retries_until_the_deficit_is_filled_when_the_model_underdelivers(): void
+    {
+        [$teacher, $subject, $unit, $blueprint] = $this->infeasibleSetup();
+        Sanctum::actingAs($teacher);
+
+        $missing = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
+            ->assertOk()->assertJsonPath('satisfiable', false)->json('missing_slots');
+
+        // The deficit is 2 long questions, but the model under-delivers: 1 distinct
+        // question on the first call, 2 more on the second. One call can't close it;
+        // the retry loop must re-ask (for only the remaining need) until it does.
+        Http::fakeSequence()
+            ->push(['status' => 'success', 'errors' => [], 'data' => [
+                ['text' => 'AI question A about AVL trees.', 'type' => 'long', 'marks' => 10],
+            ]])
+            ->push(['status' => 'success', 'errors' => [], 'data' => [
+                ['text' => 'AI question B about B-trees.', 'type' => 'long', 'marks' => 10],
+                ['text' => 'AI question C about red-black trees.', 'type' => 'long', 'marks' => 10],
+            ]]);
+
+        $slots = array_map(fn ($m) => [
+            'section_label' => $m['section_label'], 'type' => $m['type'],
+            'marks' => $m['marks'], 'unit_id' => $m['unit_id'], 'need' => $m['need'],
+        ], $missing);
+
+        (new ExpandQuestionBank($blueprint->id, $slots))
+            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+
+        // Two rounds were needed; three distinct AI questions landed on the unit.
+        Http::assertSentCount(2);
+        $this->assertSame(3, Question::where('source', 'ai')->count());
+
+        // One click's worth of expansion now makes the blueprint satisfiable.
+        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
+            ->assertOk()->assertJsonPath('satisfiable', true);
+    }
+
+    public function test_job_dedups_repeated_text_and_stops_when_a_round_adds_nothing(): void
+    {
+        [, $subject, $unit, $blueprint] = $this->infeasibleSetup();
+
+        // The model returns the *same* question every call — a common small-model failure.
+        // Round 1 stores it once; round 2 adds nothing (all duplicates), so the loop must
+        // bail rather than burn all MAX_ATTEMPTS_PER_SLOT calls.
+        Http::fake(['*/generate-questions' => Http::response([
+            'status' => 'success', 'errors' => [],
+            'data' => [['text' => 'The one and only AVL question.', 'type' => 'long', 'marks' => 10]],
+        ], 200)]);
+
+        $slots = [[
+            'section_label' => 'Section B', 'type' => 'long', 'marks' => 10,
+            'unit_id' => $unit->id, 'need' => 2,
+        ]];
+
+        (new ExpandQuestionBank($blueprint->id, $slots))
+            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+
+        // Only the single distinct question is stored, and we stopped after the empty round.
+        $this->assertSame(1, Question::where('source', 'ai')->count());
+        Http::assertSentCount(2);
+    }
+
     public function test_job_isolates_malformed_items_and_stamps_slot_values(): void
     {
         [, $subject, $unit, $blueprint] = $this->infeasibleSetup();

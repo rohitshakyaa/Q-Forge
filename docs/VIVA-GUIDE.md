@@ -480,6 +480,91 @@ reason instead of blindly retrying a file that will never parse.
 
 ---
 
+## 5.5. Syllabus → Subject extraction & import (the other pipeline)
+
+There are two document pipelines. §2/§3 cover *past-paper* extraction (PDF → candidate questions → review queue). This section covers the *syllabus* pipeline (PDF → a subject's units), because an examiner may ask "how do you turn a syllabus PDF into units?" and it has different mechanics.
+
+### The flow
+
+1. **Upload.** Admin drops a syllabus PDF (`type=syllabus`) — either on the general
+   [`/admin/upload`](../frontend/src/views/admin/AdminUploadView.vue) page, or directly from a
+   subject's **Syllabus → Upload** tab
+   ([`AdminSubjectDetailView.vue`](../frontend/src/views/admin/AdminSubjectDetailView.vue)). Both hit
+   `POST /uploads`; the file is stored on the shared disk and `ProcessDocumentUpload` is queued.
+2. **Parse (Python, stateless).** The job calls `PythonService::extract`, which routes syllabus
+   documents to [`syllabus.py::parse_courses`](../python-service/app/services/syllabus.py). The parser
+   handles **two TU document families** with shared machinery — one file per PDF may hold many courses:
+   - **CSIT/BIT template** (the original): splits into **courses** on each `Course Title:` line, reads
+     the code from `Course No:` / `Course Number:` / `Course Code:` (spaced codes like `BIT 201` are
+     de-spaced to `BIT201`), and detects unit headings `Unit N: <name> (<hrs>)`.
+   - **Faculty-of-Management / BIM template** (added later): these PDFs have *no* `Course Title:`
+     header, pack **many courses per file**, and give hours as `LH 4` / `4 LHs` (and, glued by
+     pdfplumber, `LH4` / `Unit1:`). When there is no `Course Title:`, a sibling boundary-finder splits
+     instead on **`DEPT ###:` code headings** (`IT 229:` → `IT229`, name after the colon; en-dashes
+     like `ITC – 211:` normalised) **or** a bare title anchored by its `Credits:` / `Lecture Hours:`
+     block — with cover pages, `BIM Nth Semester` banners, and the `(Elective)` line all handled, and a
+     **unit-number restart** used as a last-resort split for a genuinely header-less section. Hours also
+     accept **Roman-numeral** units (`I. … 8 LHs`).
+   - Either way it **reflows** each unit's hard-wrapped body into markdown (numbered / lettered / dash
+     sub-topics → bullets). That per-unit text doubles as the **AI grounding** context in M5 (§6).
+   - The proven `Course Title:` path is untouched by the BIM work — the BIM branch is only reached when
+     no `Course Title:` marker exists — so the original template can't regress.
+   The parsed `courses[]` land in `document_uploads.meta.courses`; **nothing is written to a subject yet.**
+3. **Confirm & import.** The admin reviews on
+   [`AdminSyllabusImportView.vue`](../frontend/src/views/admin/AdminSyllabusImportView.vue) — editing
+   unit names, hours, and **descriptions** — then `POST /uploads/{id}/import` runs
+   [`SyllabusImporter`](../code/app/Services/Extraction/SyllabusImporter.php). Nothing is stored until
+   this step.
+
+### How it's stored — **DB text, not a `.md` file**
+
+- The whole course, rendered by `render_markdown`, is stored on **`subjects.syllabus`** (longtext,
+  markdown *string* — not a file on disk).
+- Each unit's description is stored on **`units.content`** (nullable markdown text).
+- The uploaded **PDF** itself lives on the shared disk; the *extracted* syllabus is the DB text above.
+
+### Importing into an existing subject (idempotent, additive)
+
+`SyllabusImporter` finds-or-creates the subject by `code`, then `syncUnits` matches parsed units to
+existing ones by a **normalized-name fingerprint** and **only appends the missing ones** — existing
+units are never renamed, reordered, or deleted (FKs cascade-delete, so additive-only is the safe
+choice). The subject's **syllabus corpus** (`subjects.syllabus`) is **refreshed on every import** —
+uploading a syllabus is the act of setting it — while its **name and description** (catalog identity)
+change **only if** the admin ticks "Also update this subject's…" (`update_existing`). Re-running the
+same import is therefore safe.
+When launched from a subject's page, the target code is **pinned** (passed as `?subject=<code>` and
+locked in the form) so the import always lands in that subject; on success the admin is returned to it.
+
+### Honest weaknesses (say these before you're asked)
+
+- **Heuristic/regex parser, tuned to the two TU templates** (CSIT/BIT and Faculty-of-Management/BIM).
+  It reliably reads unit numbers, names, and hours, the course title/code, and stops at back matter
+  ("Laboratory Works", "References", "Text Book"). A radically different layout yields a
+  code-less/name-less course for the admin to fill in — degraded, not broken.
+- **Codeless BIM courses need a code at import.** Several BIM courses (e.g. Business Communications)
+  print no course code at all; the parser keeps `code=null` and the admin supplies it on the review
+  screen (the importer keys subjects by `code`). This is expected, not a failure.
+- **A truly header-less section becomes an anonymous course.** A BIM section with no code heading *and*
+  no `Credits:` block (e.g. 1st-sem "Digital Logic Design", whose title floats a few lines above its
+  first unit) is recovered only by its unit numbering restarting — its units group correctly but its
+  name/code are blank for the admin to fill. Best-effort by design.
+- **Table-column bleed.** When units sit in a table (description | methodology | hours), pdfplumber
+  interleaves the columns, so a unit's `content` can pick up "Lecture/Lab" fragments. Mitigation:
+  the description is **editable in the review screen**, and *nothing is stored until the admin
+  presses Import* — so a human always cleans it first.
+- **Combined syllabus + model-question PDFs, or a cover-page course list,** produce spurious 0-unit
+  "courses". The review screen **hides any 0-unit course**, since it could never be imported anyway.
+
+*(All of this is grounded in real TU documents: the parser is calibrated against the actual
+BIM 1st/2nd/8th-semester PDFs, and `python-service/tests/test_syllabus.py` pins both templates —
+the CSIT fixtures act as a regression fence so the BIM work can't break the original path.)*
+
+**One-line defense:** *"Python parses the PDF into a proposed course + units; Laravel stores nothing
+until the admin confirms on a review screen where every field is editable; and importing into an
+existing subject only ever adds missing units, so it's safe to re-run."*
+
+---
+
 ## 6. AI-assisted bank expansion (M5) — AI helps, the algorithm decides
 
 **The scenario:** a teacher's blueprint is infeasible — the bank simply doesn't have enough questions
@@ -497,17 +582,28 @@ Model — an AI that writes text) to author fresh candidate questions to fill th
    questions, not slots, so it genuinely cannot help here.*
 5. Otherwise it dispatches [`ExpandQuestionBank`](../code/app/Jobs/ExpandQuestionBank.php) inside a
    `Bus::batch` and returns a `jobId`. The frontend polls `GET /jobs/{batchId}`.
-6. The job, per missing slot: builds a **grounding block** with
+6. The job, per missing slot: builds a **grounding block** once with
    [`GroundingBuilder`](../code/app/Services/AiExpansion/GroundingBuilder.php) = the subject syllabus
-   + the unit's content + up to 3 approved example questions of the same type. It calls
-   `PythonService::generateQuestions(grounding, type, marks, need + 2)`.
+   + the unit's content + up to 3 approved example questions of the same type. Then it **retries**:
+   `fillSlot` calls `PythonService::generateQuestions(grounding, type, marks, remaining + 2)` up to
+   `MAX_ATTEMPTS_PER_SLOT = 3` times, requesting only the *remaining* shortfall each round, until the
+   slot is filled — or a round adds nothing new (the model has run out of distinct questions), which
+   stops the loop early. *(This is deliberate: a small local model routinely under-delivers — asked
+   for 12, it hands back 6 — so a single call rarely closes a deficit. Without the retry, the teacher
+   would have to click "Expand" several times.)*
 7. Python (`/generate-questions`) runs the `LLMProvider` (default `OllamaProvider` → the
    `qforge_ollama` container running `qwen2.5:3b-instruct`; a `StubProvider` is used in tests). It
    returns valid questions in `data` and malformed ones in `errors` — one bad item never sinks the
    batch.
 8. Back in the job, survivors are stored as ordinary `questions` rows with **`source=ai`,
    `status=approved`**, with `type` and `marks` **stamped from the slot** (not from the model).
-9. The teacher regenerates; the new questions are now selectable and the paper succeeds.
+   `storeSurvivors` **dedups by normalized text** against the existing bank (lowercased,
+   whitespace-collapsed), so a model that repeats itself across retries can't spam near-identical
+   rows — important because the "no repeated questions" rule checks by *id*, so duplicate wording
+   would otherwise slip through into a paper.
+9. The teacher regenerates; the new questions are now selectable and the paper succeeds. *(A
+   unit-coverage shortfall may still need another round — each expand targets the least-populated
+   uncovered unit — but a single (type, marks) supply gap is now closed in one click.)*
 
 **Exactly what the AI DOES decide:**
 - The *wording* of candidate questions (and, for MCQs, the option strings + which is correct).
@@ -711,6 +807,14 @@ primary key** — the subject syllabus, the unit's content, and up to 3 approved
 nothing"), and `/generate-questions` routes each invalid item to `errors` rather than failing the
 batch. If Python is unreachable, `PythonService` throws and the job logs it and moves on. The worst
 case is "bank still too thin" — never an invalid paper.
+
+**Q18b. The model returns fewer questions than you ask for — doesn't that break the one-click expand?**
+No. `ExpandQuestionBank::fillSlot` **retries** per slot (up to `MAX_ATTEMPTS_PER_SLOT = 3`),
+re-asking for only the *remaining* shortfall each round, so one under-delivering response no longer
+leaves the bank short. It stops early when a round adds nothing new, and `storeSurvivors` **dedups by
+normalized text** so retries can't inflate the count with repeated wording. A pure supply gap is now
+closed in a single click; only a unit-coverage shortfall (each round targets a different uncovered
+unit) may still need another.
 
 **Q19. How do you stop the AI from deciding marks or units?**
 `ExpandQuestionBank::storeSurvivors` **stamps** `type` and `marks` from the slot, not the model (and

@@ -71,13 +71,25 @@ class SyllabusImporter
             ]);
         }
 
-        // An existing subject keeps its own details unless the admin asked otherwise.
+        // The uploaded document *is* the syllabus corpus, so refresh it on every import —
+        // that is the whole point of uploading a syllabus into an existing subject.
+        $updates = [];
+        if (($data['syllabus'] ?? null) !== null) {
+            $updates['syllabus'] = $data['syllabus'];
+        }
+
+        // Name and description are the teacher's catalog identity, not the document's, so
+        // they change only when the admin explicitly opts in.
         if ($payload['update_existing'] ?? false) {
-            $subject->update(array_filter([
-                'name' => $data['name'] ?? null,
-                'description' => $data['description'] ?? null,
-                'syllabus' => $data['syllabus'] ?? null,
-            ], fn ($value) => $value !== null));
+            foreach (['name', 'description'] as $field) {
+                if (($data[$field] ?? null) !== null) {
+                    $updates[$field] = $data[$field];
+                }
+            }
+        }
+
+        if ($updates !== []) {
+            $subject->update($updates);
         }
 
         return $subject;

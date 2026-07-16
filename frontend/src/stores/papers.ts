@@ -204,14 +204,42 @@ export const usePapersStore = defineStore('papers', () => {
     shortfallReason.value = null;
   };
 
-  /** Poll a batch's status until it finishes or fails (or we give up). */
+  /**
+   * Poll a batch's status until it finishes or fails (or we give up).
+   *
+   * Two independent guards, because a healthy expansion can run several minutes
+   * (queue wait + slow local-LLM generation):
+   *  - a hard 10-minute ceiling on the whole poll, so it can't hang forever;
+   *  - a no-progress stall guard — we only give up early if `progress` hasn't
+   *    advanced for STALL_LIMIT consecutive polls. Actively generating never
+   *    counts against us (progress ticks up), only a genuinely stuck job does.
+   *    Note: the batch reports 'processing' with progress=0 while still *queued*,
+   *    which is indistinguishable from a stuck job here, so STALL_LIMIT is set
+   *    generously above a realistic worst-case queue wait to avoid false aborts.
+   */
   async function pollJob(jobId: string): Promise<boolean> {
-    for (let attempt = 0; attempt < 90; attempt += 1) {
+    const POLL_INTERVAL_MS = 2000;
+    const MAX_ATTEMPTS = (10 * 60 * 1000) / POLL_INTERVAL_MS; // 10 minutes
+    const STALL_LIMIT = 90; // ~3 min with no forward progress → assume stuck
+
+    let lastProgress = -1;
+    let stalledPolls = 0;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
       const { data } = await api.get<JobStatus>(`/jobs/${jobId}`);
       if (data.status === 'finished') return true;
       if (data.status === 'failed' || data.status === 'cancelled') return false;
+
+      if (data.progress > lastProgress) {
+        lastProgress = data.progress;
+        stalledPolls = 0;
+      } else {
+        stalledPolls += 1;
+        if (stalledPolls >= STALL_LIMIT) return false;
+      }
+
       expandStatus.value = `Generating questions… ${data.progress}%`;
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
     return false;
   }

@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\AdminOverviewController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\SubjectController;
 use App\Http\Controllers\Api\UnitController;
@@ -74,6 +75,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Admin-only writes for the catalog + full question management.
     Route::middleware('role:admin')->group(function () {
+        // Dashboard overview — system-wide aggregate counts + activity feed.
+        Route::get('admin/overview', [AdminOverviewController::class, 'index']);
+
         // Users & Roles — admin-provisioned accounts (no public signup).
         Route::apiResource('users', UserController::class)->only(['index', 'store', 'update', 'destroy']);
 

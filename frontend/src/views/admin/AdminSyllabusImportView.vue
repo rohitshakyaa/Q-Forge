@@ -22,11 +22,16 @@ interface UnitDraft {
   number: number;
   name: string;
   hours: string;
-  content: string | null;
+  content: string;
   guessed: boolean;
 }
 
 const uploadId = Number(route.params.uploadId);
+
+// When launched from a subject's detail page, the target subject is pinned: the import
+// must land in that subject (not a new one derived from the PDF), and we return there on
+// success. Absent this param the screen behaves as the normal upload-page flow.
+const pinnedCode = typeof route.query.subject === 'string' ? route.query.subject : undefined;
 
 const upload = ref<Upload | null>(null);
 const loading = ref(true);
@@ -41,7 +46,9 @@ const updateExisting = ref(false);
 const subject = reactive({ code: '', name: '', description: '' });
 const units = ref<UnitDraft[]>([]);
 
-const courses = computed(() => upload.value?.courses ?? []);
+// A course with no units can't be imported (import requires >= 1 unit), so hide it —
+// this drops the junk 0-unit "course" a combined syllabus + model-question PDF produces.
+const courses = computed(() => (upload.value?.courses ?? []).filter((c) => c.units.length > 0));
 const course = computed<Course | undefined>(() => courses.value[selectedIndex.value]);
 
 const courseOptions = computed(() =>
@@ -120,7 +127,9 @@ const applyCourse = () => {
   const selected = course.value;
   if (!selected) return;
 
-  subject.code = selected.code ?? '';
+  // A pinned code overrides whatever the PDF parsed, keeping the import bound to the
+  // subject the user came from.
+  subject.code = pinnedCode ?? selected.code ?? '';
   subject.name = selected.name ?? '';
   subject.description = selected.description ?? '';
   updateExisting.value = false;
@@ -131,7 +140,7 @@ const applyCourse = () => {
     number: u.number,
     name: u.name ?? '',
     hours: u.hours === null ? '' : String(u.hours),
-    content: u.content,
+    content: u.content ?? '',
     guessed: u.nameGuessed,
   }));
 };
@@ -160,7 +169,7 @@ const submit = async () => {
         number: u.number,
         name: u.name.trim(),
         hours: u.hours === '' ? null : Number(u.hours),
-        content: u.content,
+        content: u.content.trim() || null,
       })),
       updateExisting: updateExisting.value,
     });
@@ -173,6 +182,10 @@ const submit = async () => {
     // everywhere else. Refreshing also flips each row to "✓ exists" for a re-import.
     await catalog.fetchSubjects();
     await refreshExistingUnits();
+
+    // Launched from a subject page: close the loop by returning there so the freshly
+    // added units and syllabus show up in context.
+    if (pinnedCode) router.push(`/admin/subjects/${pinnedCode}`);
   } catch (e: unknown) {
     const data = (e as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } })
       .response?.data;
@@ -263,7 +276,13 @@ onMounted(async () => {
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-2.5">
-            <QFInput v-model="subject.code" label="Subject code" placeholder="e.g. CSC365" />
+            <QFInput
+              v-model="subject.code"
+              label="Subject code"
+              placeholder="e.g. CSC365"
+              :disabled="!!pinnedCode"
+              :hint="pinnedCode ? 'Locked — importing into this subject' : undefined"
+            />
             <QFInput v-model="subject.name" label="Subject name" />
           </div>
           <div style="margin-top: 12px">
@@ -280,7 +299,8 @@ onMounted(async () => {
             style="display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--text2)"
           >
             <input v-model="updateExisting" type="checkbox" />
-            Also update this subject's name, description and syllabus text
+            Also update this subject's name and description
+            <span style="color: var(--text3)">(the syllabus text always refreshes)</span>
           </label>
           <div v-else style="margin-top: 10px; font-size: 11.5px; color: var(--text3)">
             The parsed syllabus will be stored on the subject as markdown.
@@ -332,16 +352,28 @@ onMounted(async () => {
               <span v-if="u.name.trim() === ''" style="color: var(--danger)">
                 a name is required before this unit can be created
               </span>
-              <span v-if="u.content" style="color: var(--text3)">
+              <span v-if="u.content.trim()" style="color: var(--text3)">
                 {{ u.content.length }} chars of syllabus content
               </span>
+            </div>
+            <div style="margin-top: 8px; margin-left: 46px">
+              <QFInput
+                v-model="u.content"
+                label="Description (markdown)"
+                type="textarea"
+                :rows="3"
+                hint="Extraction can bleed table columns into this text — review and clean it up before importing."
+              />
             </div>
           </div>
         </div>
       </QFCard>
 
       <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px">
-        <QFButton variant="secondary" @click="router.push('/admin/upload')">Cancel</QFButton>
+        <QFButton
+          variant="secondary"
+          @click="router.push(pinnedCode ? `/admin/subjects/${pinnedCode}` : '/admin/upload')"
+        >Cancel</QFButton>
         <QFButton variant="primary" :disabled="!canImport" @click="submit">
           {{ importing ? 'Importing…' : `Import ${willAddCount} unit(s)` }}
         </QFButton>
