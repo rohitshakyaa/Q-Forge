@@ -5,6 +5,7 @@ from app.services.parser import (
     find_marks,
     is_noise,
     parse_pages,
+    section_default_from_line,
     unit_hint_from_line,
 )
 from app.services.pdf import PageText
@@ -54,6 +55,67 @@ class TestFindMarks:
 
     def test_rejects_implausible_totals(self):
         assert find_marks("[80 marks] [90 marks]") is None
+
+    @pytest.mark.parametrize(
+        ("block", "expected"),
+        [
+            # The TU 2079 CSC410 paper prints wordless parens at the line end.
+            ("Discuss two drawbacks of Apriori. Find the itemsets. (2+8)", 10),
+            ("Why are OLAP operations used? Discuss each. (1+9)", 10),
+        ],
+    )
+    def test_reads_compound_trailing_parens(self, block, expected):
+        assert find_marks(block) == expected
+
+    def test_compound_paren_mid_text_is_not_marks(self):
+        assert find_marks("Solve (2+8) using the identity given.") is None
+
+    def test_bare_trailing_paren_needs_the_section_default_to_vouch(self):
+        block = "Discuss different types of attributes. (5)"
+        assert find_marks(block) is None
+        assert find_marks(block, default=5) == 5
+        # A mismatched value stays untrusted — likely a list marker after all.
+        assert find_marks(block, default=10) is None
+
+    def test_the_default_alone_is_not_a_token(self):
+        # `find_marks` reads printed marks; falling back to the default is the
+        # caller's decision, made in `_flush`.
+        assert find_marks("Define management in brief.", default=10) is None
+
+    def test_ocr_confused_digits_are_folded(self):
+        # "[I + 4]" occurs verbatim in the scanned TU 2078 CSc410 paper.
+        assert find_marks("Define data discretization. [I + 4]") == 5
+
+    def test_folding_requires_a_real_digit(self):
+        # A roman-numeral citation must not become arithmetic.
+        assert find_marks("As shown in [ii] above.") is None
+
+
+class TestSectionDefault:
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            # Verbatim shapes from the TU MGT411/CSC410 papers, 2078-2083.
+            ("Attempt any Two questions: [3x10=30]", 10),
+            ("Attempt any THREE Questions. (3 x 10 = 30)", 10),
+            ("Attempt any TEN Questions. (10 x 5 = 50)", 5),
+            ("Attempt any EIGHT questions . [8x 5 = 40]", 5),
+            ("Attempt any TWO questions. [2 × 10 = 20]", 10),
+            ("Attempt any eight questions. [8x5:40]", 5),
+            ("Attempt all questions [5 x 4]", 4),
+        ],
+    )
+    def test_reads_the_per_question_value(self, line, expected):
+        assert section_default_from_line(line) == expected
+
+    def test_a_directive_without_an_expression_sets_nothing(self):
+        assert section_default_from_line("Attempt any TWO questions") is None
+
+    def test_a_total_that_disagrees_is_ocr_damage(self):
+        assert section_default_from_line("Attempt any TWO questions. [2 x 10 = 80]") is None
+
+    def test_an_expression_off_a_directive_line_sets_nothing(self):
+        assert section_default_from_line("1. Write short notes on: [2 x 2.5=5]") is None
 
 
 class TestClassifyType:
@@ -201,3 +263,70 @@ class TestParsePages:
         result = parse_pages([page("1. Explain BFS", 1), page("in detail with analysis.", 2)])
         assert len(result) == 1
         assert result[0].page == 1
+
+
+class TestSectionDefaultMarks:
+    """Papers that print marks only on the section directive (the TU MGT411 set)."""
+
+    @pytest.fixture
+    def candidates(self):
+        text = "\n".join(
+            [
+                "Tribhuvan University",
+                "Section A",
+                "Attempt any THREE Questions. (3 x 10 = 30)",
+                "1. Define management. Describe the functions of management.",
+                "2. Introduce planning. Describe the process of planning.",
+                "Section B",
+                "Attempt any TEN Questions. (10 x 5 = 50)",
+                "5. State and explain the problems of goal formulation.",
+                "6. Distinguish centralization from decentralization. [2+3]",
+            ]
+        )
+        return parse_pages([page(text)])
+
+    def test_directive_marks_fill_unmarked_questions(self, candidates):
+        assert [c.marks for c in candidates] == [10, 10, 5, 5]
+
+    def test_directive_marks_drive_type_classification(self, candidates):
+        # A 10-mark question is an essay even without an essay verb.
+        assert candidates[0].type == "long"
+        assert candidates[2].type == "short"
+
+    def test_printed_marks_beat_the_default(self):
+        text = "\n".join(
+            [
+                "Section A",
+                "Attempt any TWO questions. [2 x 10 = 20]",
+                "1. Compare the two approaches in depth. [4+6]",
+            ]
+        )
+        assert parse_pages([page(text)])[0].marks == 10
+
+    def test_a_new_section_heading_voids_the_default(self):
+        text = "\n".join(
+            [
+                "Section A",
+                "Attempt any TWO questions. [2 x 10 = 20]",
+                "1. Define management and its functions in detail.",
+                "Section B",  # its own directive was lost to OCR
+                "5. State and explain the problems of goal formulation.",
+            ]
+        )
+        first, second = parse_pages([page(text)])
+        assert first.marks == 10
+        assert second.marks is None
+
+    def test_trailing_paren_marks_are_detected_and_stripped(self):
+        text = "\n".join(
+            [
+                "Section B",
+                "Attempt any EIGHT questions [8x 5 = 40]",
+                "5. Discuss different types of attributes with examples. (5)",
+                "6. Why is normalization important? Explain both approaches. (1+4)",
+            ]
+        )
+        five, six = parse_pages([page(text)])
+        assert (five.marks, six.marks) == (5, 5)
+        assert "(5)" not in five.text
+        assert "(1+4)" not in six.text

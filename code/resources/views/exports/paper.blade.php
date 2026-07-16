@@ -18,8 +18,6 @@
         .q { margin-bottom: 10px; }
         .q-no { font-weight: bold; color: #0a7; }
         .q-marks { font-weight: bold; color: #444; float: right; }
-        .q-tags { font-size: 10px; color: #555; margin-top: 2px; }
-        .tag { display: inline-block; border: 1px solid #ccc; border-radius: 3px; padding: 1px 5px; margin-right: 4px; }
     </style>
 </head>
 <body>
@@ -42,12 +40,6 @@
             <div class="q">
                 <span class="q-marks">[{{ $q['marks'] }} Marks]</span>
                 <span class="q-no">{{ $q['no'] }}.</span> {{ $q['text'] }}
-                @if($q['unit'] || $q['ai'])
-                    <div class="q-tags">
-                        @if($q['unit'])<span class="tag">{{ $q['unit'] }}</span>@endif
-                        @if($q['ai'])<span class="tag">AI Generated</span>@endif
-                    </div>
-                @endif
             </div>
         @endforeach
     @endforeach

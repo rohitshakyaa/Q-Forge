@@ -66,9 +66,7 @@ class PaperWordBuilder
                 $line = $section->addTextRun(['spaceAfter' => 120]);
                 $line->addText("{$q['no']}.  ", ['bold' => true]);
                 $line->addText($q['text']);
-                $meta = trim(($q['unit'] ? "[{$q['unit']}] " : '').($q['ai'] ? '[AI] ' : ''));
-                $tail = "[{$q['marks']} Marks]".($meta ? "   {$meta}" : '');
-                $line->addText("    {$tail}", ['bold' => true, 'size' => 10, 'color' => '444444']);
+                $line->addText("    [{$q['marks']} Marks]", ['bold' => true, 'size' => 10, 'color' => '444444']);
             }
 
             $section->addTextBreak(1);

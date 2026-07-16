@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  QFAIHint,
   QFBadge,
   QFButton,
   QFCard,
@@ -55,6 +54,12 @@ const stepIndex = computed(() => {
   if (phase.value === 'generating') return 2;
   return 3;
 });
+
+// Straight from a card's own button: select and jump to the Configure step in one click.
+const configure = (bp: Blueprint) => {
+  selectedBP.value = bp;
+  phase.value = 'idle';
+};
 
 const startGeneration = async () => {
   if (!selectedBP.value) return;
@@ -109,12 +114,12 @@ const unitBreakdown = (bp: Blueprint) =>
     </div>
 
     <div v-if="phase === 'select'" class="qf-anim-in">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
+      <!-- <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
         <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px">Your Blueprints</div>
         <QFButton variant="secondary" size="sm" @click="router.push('/teacher/blueprint/new')">
           + New Blueprint
         </QFButton>
-      </div>
+      </div> -->
 
       <div style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center">
         <div style="position: relative; flex: 1; max-width: 340px">
@@ -169,51 +174,29 @@ const unitBreakdown = (bp: Blueprint) =>
         <div
           v-for="bp in blueprints"
           :key="bp.id"
-          :style="{
-            background: 'var(--bg1)',
-            border: `2px solid ${selectedBP?.id === bp.id ? 'var(--cyan)' : 'var(--border)'}`,
-            borderRadius: 'var(--radius-lg)',
-            padding: '18px 20px',
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            boxShadow: selectedBP?.id === bp.id ? '0 0 20px var(--cyan-glow)' : 'none',
-            display: 'flex',
-            flexDirection: 'column',
-          }"
-          @click="selectedBP = bp"
+          style="
+            background: var(--bg1);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+          "
         >
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px">
-            <div style="min-width: 0">
-              <div style="font-family: var(--font-head); font-weight: 700; font-size: 15px; margin-bottom: 3px">
-                {{ bp.name }}
-              </div>
-              <span
-                style="
-                  font-family: var(--font-mono);
-                  font-size: 11.5px;
-                  color: var(--cyan);
-                  background: var(--cyan-dim);
-                  padding: 2px 7px;
-                  border-radius: 6px;
-                "
-              >{{ bp.subject }}</span>
+          <div style="min-width: 0; margin-bottom: 10px">
+            <div style="font-family: var(--font-head); font-weight: 700; font-size: 15px; margin-bottom: 3px">
+              {{ bp.name }}
             </div>
-            <div
-              v-if="selectedBP?.id === bp.id"
+            <span
               style="
-                width: 22px;
-                height: 22px;
-                background: var(--cyan);
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                color: var(--on-primary);
-                font-size: 12px;
-                font-weight: 700;
-                flex-shrink: 0;
+                font-family: var(--font-mono);
+                font-size: 11.5px;
+                color: var(--cyan);
+                background: var(--cyan-dim);
+                padding: 2px 7px;
+                border-radius: 6px;
               "
-            >✓</div>
+            >{{ bp.subject }}</span>
           </div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px">
             <span class="qf-chip">{{ bp.questions }} questions</span>
@@ -284,23 +267,16 @@ const unitBreakdown = (bp: Blueprint) =>
               border-top: 1px solid var(--border);
               padding-top: 8px;
               margin-top: auto;
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 10px;
             "
-          >Last used: {{ bp.lastUsed }}</div>
+          >
+            <span>Last used: {{ bp.lastUsed }}</span>
+            <QFButton size="sm" variant="primary" @click="configure(bp)">Configure →</QFButton>
+          </div>
         </div>
-      </div>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <QFAIHint v-if="selectedBP">
-          Blueprint <strong style="color: var(--ai)">{{ selectedBP.name }}</strong> selected —
-          {{ selectedBP.questions }} questions from {{ selectedBP.subject }}, excluding last
-          {{ selectedBP.exclusionRules.lastNPapers }} papers.
-        </QFAIHint>
-        <div v-else style="color: var(--text3); font-size: 13px">Select a blueprint above to continue</div>
-        <QFButton
-          variant="primary"
-          :disabled="!selectedBP"
-          style="margin-left: 16px; flex-shrink: 0"
-          @click="phase = 'idle'"
-        >Configure →</QFButton>
       </div>
     </div>
 

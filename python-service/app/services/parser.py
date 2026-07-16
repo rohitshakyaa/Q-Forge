@@ -22,7 +22,9 @@ _UNIT_HINT = re.compile(
 )
 
 # Marks are signposted by brackets, or by the word itself. A bare "(5)" is too
-# often a list marker or a citation to trust, so parentheses must say "marks".
+# often a list marker or a citation to trust, so parentheses must say "marks" —
+# except at the very end of a question, where papers like the TU 2079 CSC410 set
+# print "(2+8)" / "(5)" with no word at all (see `_marks_spans`).
 #
 # Real papers rarely print a single number. Tribhuvan University model questions
 # use compound forms for split questions — "[8+2]", "[2.5+2.5]", "[2 x 2.5=5]" —
@@ -31,8 +33,22 @@ _UNIT_HINT = re.compile(
 _BRACKET_MARKS = re.compile(r"\[([^\[\]]{1,24})\]")
 _PAREN_MARKS = re.compile(r"\(([^()]{1,24})\)")
 _BARE_MARKS = re.compile(r"\b(\d{1,2}(?:\.\d+)?)\s*marks?\b", re.IGNORECASE)
+_TRAILING_PAREN = re.compile(r"\(([^()]{1,24})\)\s*$")
 
 _MARKS_EXPR = re.compile(r"^[\d\s.+x×*=]+$", re.IGNORECASE)
+
+# OCR misreads inside a marks token — "[I + 4]" for "[1 + 4]". Applied after
+# lower-casing, and only when the token already carries a real digit, so a
+# roman-numeral citation "[i]" is still rejected as non-arithmetic.
+_OCR_DIGITS = str.maketrans({"i": "1", "l": "1", "|": "1", "o": "0"})
+
+# The section directive: "Attempt any TEN questions. [10 x 5 = 50]". Many TU
+# papers (the MGT411 set among them) print marks nowhere else — the directive's
+# middle factor is the worth of every question in the section. The stated total,
+# when printed, must agree with count x per; a mismatch means OCR mangled a digit
+# and the value cannot be trusted.
+_DIRECTIVE = re.compile(r"^\s*(?:attempt|answer)\s+(?:all|any)\b", re.IGNORECASE)
+_DIRECTIVE_MARKS = re.compile(r"[\[(]\s*(\d{1,2})\s*[x×*]\s*(\d{1,3})\s*(?:[=:]\s*(\d{1,3})\s*)?[\])]")
 
 # Rubric, letterhead and footer lines that carry no question content. These repeat
 # on every page of a multi-paper document, so they must be dropped rather than
@@ -86,6 +102,26 @@ def unit_hint_from_line(line: str) -> str | None:
     return re.sub(r"\s+", " ", match.group(1)).strip()
 
 
+def section_default_from_line(line: str) -> int | None:
+    """Per-question marks from a section directive, or None.
+
+    "Attempt any TEN questions. [10 x 5 = 50]" -> 5. Only the "count x per"
+    shape counts; a directive with no expression sets nothing.
+    """
+    if not _DIRECTIVE.match(line):
+        return None
+
+    match = _DIRECTIVE_MARKS.search(line)
+    if not match:
+        return None
+
+    count, per = int(match.group(1)), int(match.group(2))
+    if match.group(3) is not None and count * per != int(match.group(3)):
+        return None
+
+    return per
+
+
 def _evaluate_marks(inner: str) -> float | None:
     """Read a marks expression: "5", "12 marks", "8+2", "2.5+2.5", "2 x 2.5=5".
 
@@ -93,6 +129,8 @@ def _evaluate_marks(inner: str) -> float | None:
     and citations must not be mistaken for a score.
     """
     expression = re.sub(r"marks?", "", inner, flags=re.IGNORECASE).strip().lower()
+    if re.search(r"\d", expression):
+        expression = expression.translate(_OCR_DIGITS)
     if not expression or not _MARKS_EXPR.match(expression):
         return None
 
@@ -115,7 +153,7 @@ def _evaluate_marks(inner: str) -> float | None:
         return None
 
 
-def _marks_spans(block: str) -> list[tuple[int, int, float]]:
+def _marks_spans(block: str, default: int | None = None) -> list[tuple[int, int, float]]:
     """Locate every marks token, discarding overlaps longest-first.
 
     The forms overlap — "[12 Marks]" matches both the bracket form and the bare
@@ -136,6 +174,18 @@ def _marks_spans(block: str) -> list[tuple[int, int, float]]:
         if value is not None:
             spans.append((match.start(), match.end(), value))
 
+    # A wordless paren at the very end of the question — "… algorithm. (2+8)" —
+    # is a marks token, not a list marker: a compound expression always, a bare
+    # number only when it agrees with the section directive's per-question value.
+    trailing = _TRAILING_PAREN.search(block)
+    if trailing:
+        value = _evaluate_marks(trailing.group(1))
+        if value is not None and (
+            re.search(r"[+x×*=]", trailing.group(1), re.IGNORECASE)
+            or (default is not None and value == default)
+        ):
+            spans.append((trailing.start(), trailing.end(), value))
+
     for match in _BARE_MARKS.finditer(block):
         spans.append((match.start(), match.end(), float(match.group(1))))
 
@@ -152,14 +202,17 @@ def _marks_spans(block: str) -> list[tuple[int, int, float]]:
     return kept
 
 
-def find_marks(block: str) -> int | None:
+def find_marks(block: str, default: int | None = None) -> int | None:
     """Total the marks signposted in a block.
 
     A block may carry several ("a) … [5] b) … [5]"); the question is worth their
     sum. Fractional marks ("2.5+2.5") are summed then rounded, since the column
     is an integer and half-marks only ever appear as halves of a whole.
+
+    `default` is the section directive's per-question value; it does not add to
+    the total, it only vouches for a bare trailing "(5)".
     """
-    spans = _marks_spans(block)
+    spans = _marks_spans(block, default)
     if not spans:
         return None
 
@@ -184,16 +237,16 @@ def classify_type(block: str, marks: int | None) -> str:
     return "short"
 
 
-def _strip_marks(block: str) -> str:
+def _strip_marks(block: str, default: int | None = None) -> str:
     """Remove the marks tokens from the question text; they live in `marks` now."""
-    for start, end, _ in reversed(_marks_spans(block)):
+    for start, end, _ in reversed(_marks_spans(block, default)):
         block = block[:start] + " " + block[end:]
 
     return block
 
 
-def _clean(block: str) -> str:
-    block = _strip_marks(block)
+def _clean(block: str, default: int | None = None) -> str:
+    block = _strip_marks(block, default)
     block = re.sub(r"[ \t]+", " ", block)
     block = re.sub(r"\n{2,}", "\n", block)
 
@@ -206,10 +259,15 @@ def _flush(
     unit_hint: str | None,
     page: int,
     ocr: bool,
+    default: int | None = None,
 ) -> Candidate | None:
     raw = "\n".join(lines)
-    marks = find_marks(raw)
-    text = _clean(raw)
+    # The question's own printed marks win; the section directive's per-question
+    # value fills in when the paper prints marks nowhere else (the MGT411 set).
+    marks = find_marks(raw, default)
+    if marks is None:
+        marks = default
+    text = _clean(raw, default)
 
     if len(text) < _MIN_CANDIDATE_CHARS:
         return None
@@ -232,13 +290,14 @@ def parse_pages(pages: list[PageText]) -> list[Candidate]:
     number: str | None = None
     buffer: list[str] = []
     unit_hint: str | None = None
+    section_default: int | None = None
     start_page = 1
     start_ocr = False
 
     def flush() -> None:
         nonlocal buffer, number
         if buffer:
-            candidate = _flush(number, buffer, unit_hint, start_page, start_ocr)
+            candidate = _flush(number, buffer, unit_hint, start_page, start_ocr, section_default)
             if candidate:
                 candidates.append(candidate)
         buffer = []
@@ -252,9 +311,19 @@ def parse_pages(pages: list[PageText]) -> list[Candidate]:
 
             hint = unit_hint_from_line(stripped)
             if hint:
-                # A new unit heading ends the question that preceded it.
+                # A new unit heading ends the question that preceded it — and
+                # voids the old directive: if this section's own directive is
+                # missed, better no marks than the previous section's.
                 flush()
                 unit_hint = hint
+                section_default = None
+                continue
+
+            default = section_default_from_line(stripped)
+            if default is not None:
+                # The directive separates sections as surely as a heading does.
+                flush()
+                section_default = default
                 continue
 
             if is_noise(stripped):
