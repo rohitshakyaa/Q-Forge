@@ -15,10 +15,12 @@ use Illuminate\Support\Facades\Log;
 /**
  * Tops up the question bank with AI-authored questions for a blueprint's named
  * missing slots (M5). AI is supportive, not authoritative: Python writes the text,
- * this job validates it, stamps the slot's own type + marks (never trusting the
- * model), resolves the target unit, and stores survivors as ordinary `questions`
- * rows with `source=ai, status=approved` — immediately usable by the generator so
- * a previously infeasible blueprint can become satisfiable on re-generate.
+ * this job validates it, stamps the slot's own type + marks + units (never trusting
+ * the model), and stores survivors as ordinary `questions` rows with
+ * `source=ai, status=approved` — immediately usable by the generator so a
+ * previously infeasible blueprint can become satisfiable on re-generate. A slot
+ * may target TWO units (coverage rule beyond the slot count): the question is
+ * asked to span both, the first id becomes its primary and both are tagged.
  */
 class ExpandQuestionBank implements ShouldQueue
 {
@@ -41,7 +43,7 @@ class ExpandQuestionBank implements ShouldQueue
     public int $timeout = 600;
 
     /**
-     * @param  array<int, array{section_label:string, type:string, marks:int, unit_id:?int, need:int}>  $slots
+     * @param  array<int, array{section_label:string, type:string, marks:int, unit_ids:int[], need:int}>  $slots
      */
     public function __construct(
         public readonly int $blueprintId,
@@ -76,24 +78,31 @@ class ExpandQuestionBank implements ShouldQueue
      * or the attempt cap is hit. Each round requests only the *remaining* need so the
      * bank isn't over-inflated once the deficit is closed. Returns the count stored.
      *
-     * @param  array{section_label:string, type:string, marks:int, unit_id:?int, need:int}  $slot
+     * @param  array{section_label:string, type:string, marks:int, unit_ids:int[], need:int}  $slot
      */
     private function fillSlot(PythonService $python, GroundingBuilder $grounding, Blueprint $blueprint, array $slot): int
     {
         $subject = $blueprint->subject;
         $type = $slot['type'];
         $marks = (int) $slot['marks'];
-        $unitId = $slot['unit_id'] ?? null;
+        $unitIds = array_values(array_map('intval', $slot['unit_ids'] ?? []));
         $need = max(1, (int) $slot['need']);
 
-        $unit = $unitId !== null ? Unit::find($unitId) : null;
+        // Load the target units preserving the slot's order — index 0 is the
+        // primary the generator chose (scarcest unit first).
+        $unitsById = Unit::query()->whereIn('id', $unitIds)->get()->keyBy('id');
+        $units = array_values(array_filter(array_map(
+            fn (int $id) => $unitsById->get($id),
+            $unitIds,
+        )));
+        $unitIds = array_map(fn (Unit $u) => (int) $u->id, $units);
 
-        // Grounding is deterministic for a (subject, unit, type, marks) tuple, so build it
-        // once and reuse it across retry rounds.
-        $block = $grounding->for($subject, $unit, $type, $marks);
+        // Grounding is deterministic for a (subject, units, type, marks) tuple, so build
+        // it once and reuse it across retry rounds.
+        $block = $grounding->for($subject, $units, $type, $marks);
         foreach ($block['notes'] as $note) {
             Log::info("ExpandQuestionBank: grounding note — {$note}", [
-                'blueprint' => $blueprint->id, 'unit_id' => $unitId, 'type' => $type,
+                'blueprint' => $blueprint->id, 'unit_ids' => $unitIds, 'type' => $type,
             ]);
         }
 
@@ -101,19 +110,21 @@ class ExpandQuestionBank implements ShouldQueue
         // wrapped prompt + raw model output live in the Python logs (LLM_DEBUG=1).
         Log::debug('ExpandQuestionBank: grounding block sent to Python', [
             'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
-            'unit_id' => $unitId, 'grounding' => $block['text'],
+            'unit_ids' => $unitIds, 'grounding' => $block['text'],
         ]);
+
+        $unitNames = array_map(fn (Unit $u) => (string) $u->name, $units);
 
         $stored = 0;
         for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS_PER_SLOT && $stored < $need; $attempt++) {
             $requested = ($need - $stored) + self::BUFFER;
 
             try {
-                $result = $python->generateQuestions($block['text'], $type, $marks, $requested);
+                $result = $python->generateQuestions($block['text'], $type, $marks, $requested, $unitNames);
             } catch (\RuntimeException $e) {
                 Log::error('ExpandQuestionBank: generation failed for slot', [
                     'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
-                    'unit_id' => $unitId, 'attempt' => $attempt, 'error' => $e->getMessage(),
+                    'unit_ids' => $unitIds, 'attempt' => $attempt, 'error' => $e->getMessage(),
                 ]);
 
                 break; // Give up on this slot; other slots may still succeed.
@@ -124,16 +135,16 @@ class ExpandQuestionBank implements ShouldQueue
             }
 
             Log::debug('ExpandQuestionBank: questions returned from Python', [
-                'blueprint' => $blueprint->id, 'type' => $type, 'unit_id' => $unitId,
+                'blueprint' => $blueprint->id, 'type' => $type, 'unit_ids' => $unitIds,
                 'attempt' => $attempt, 'data' => $result['data'], 'errors' => $result['errors'],
             ]);
 
-            $added = $this->storeSurvivors($subject->id, $unitId, $type, $marks, $result['data']);
+            $added = $this->storeSurvivors($subject->id, $unitIds, $type, $marks, $result['data']);
             $stored += $added;
 
             Log::info('ExpandQuestionBank: slot attempt', [
                 'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
-                'unit_id' => $unitId, 'attempt' => $attempt, 'need' => $need,
+                'unit_ids' => $unitIds, 'attempt' => $attempt, 'need' => $need,
                 'requested' => $requested, 'added' => $added, 'stored_so_far' => $stored,
                 'rejected' => count($result['errors']),
             ]);
@@ -147,7 +158,7 @@ class ExpandQuestionBank implements ShouldQueue
 
         Log::info('ExpandQuestionBank: slot topped up', [
             'blueprint' => $blueprint->id, 'type' => $type, 'marks' => $marks,
-            'unit_id' => $unitId, 'need' => $need, 'stored' => $stored, 'filled' => $stored >= $need,
+            'unit_ids' => $unitIds, 'need' => $need, 'stored' => $stored, 'filled' => $stored >= $need,
         ]);
 
         return $stored;
@@ -155,13 +166,15 @@ class ExpandQuestionBank implements ShouldQueue
 
     /**
      * Persist the valid candidates as approved AI questions. Laravel is authoritative
-     * for type + marks: the model's echoed values are only a sanity signal (logged on
-     * mismatch), and the slot's own type/marks are what get stored — so an AI question
-     * always matches the slot CandidateFilter will query.
+     * for type + marks + units: the model's echoed values are only a sanity signal
+     * (logged on mismatch), and the slot's own type/marks/units are what get stored —
+     * so an AI question always matches the slot CandidateFilter will query. With two
+     * target units the first becomes the primary and both are tagged on the pivot.
      *
+     * @param  int[]  $unitIds
      * @param  array<int, array<string, mixed>>  $candidates
      */
-    private function storeSurvivors(int $subjectId, ?int $unitId, string $type, int $marks, array $candidates): int
+    private function storeSurvivors(int $subjectId, array $unitIds, string $type, int $marks, array $candidates): int
     {
         // Text-based dedup across retry rounds: a small local model tends to repeat
         // itself, and near-identical rows would satisfy the count while producing a
@@ -204,7 +217,7 @@ class ExpandQuestionBank implements ShouldQueue
 
             $question = Question::create([
                 'subject_id' => $subjectId,
-                'unit_id' => $unitId,
+                'unit_id' => $unitIds[0] ?? null,  // primary = scarcest target unit
                 'type' => $type,      // stamped from the slot, not the model
                 'marks' => $marks,    // stamped from the slot, not the model
                 'difficulty' => 'medium',
@@ -214,7 +227,8 @@ class ExpandQuestionBank implements ShouldQueue
                 'attributes' => $attributes ?: null,
                 'used_count' => 0,
             ]);
-            $question->syncUnitLinks();
+            // Tag every target unit (never sync([]) — that would detach the primary).
+            $question->syncUnitLinks($unitIds !== [] ? $unitIds : null);
 
             $stored++;
         }

@@ -42,8 +42,9 @@ class BankExpansionController extends Controller
         }
 
         // Never dispatch a futile job: when coverage needs more units than the paper
-        // has questions, no amount of bank expansion can help (AI adds questions, not
-        // slots). Tell the teacher to fix the blueprint instead.
+        // can ever reach (even with two-unit questions), or the per-unit maximums
+        // can't fill the slots, no amount of bank expansion can help (AI adds
+        // questions, not slots). Tell the teacher to fix the blueprint instead.
         if ($result->coverageStructurallyInfeasible()) {
             return response()->json([
                 'satisfiable' => false,
@@ -56,7 +57,7 @@ class BankExpansionController extends Controller
             'section_label' => $slot->sectionLabel,
             'type' => $slot->type,
             'marks' => $slot->marks,
-            'unit_id' => $slot->unitId,
+            'unit_ids' => $slot->unitIds,
             'need' => $slot->need,
         ], $result->missingSlots);
 

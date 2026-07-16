@@ -238,7 +238,7 @@ const unitBreakdown = (bp: Blueprint) =>
                 letter-spacing: 0.04em;
                 text-transform: uppercase;
               "
-            >Unit Allocation</div>
+            >Unit Maximums</div>
             <div
               v-for="row in unitBreakdown(bp)"
               :key="row.unit"
@@ -248,7 +248,7 @@ const unitBreakdown = (bp: Blueprint) =>
               <span
                 v-if="row.qs === 0"
                 style="color: var(--text3); font-style: italic; font-size: 11px"
-              >no allocation</span>
+              >no max — uncapped</span>
               <span
                 v-else
                 style="
@@ -259,7 +259,7 @@ const unitBreakdown = (bp: Blueprint) =>
                 "
               >
                 <template v-for="(a, ai) in row.allocs" :key="ai">
-                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>{{ a.count }}×{{ a.marks }}M
+                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>≤{{ a.count }}×{{ a.marks }}M
                 </template>
               </span>
             </div>
@@ -348,7 +348,7 @@ const unitBreakdown = (bp: Blueprint) =>
               text-transform: uppercase;
               margin-bottom: 8px;
             "
-          >Unit Allocation</div>
+          >Unit Maximums</div>
           <div style="display: flex; flex-direction: column; gap: 5px">
             <div
               v-for="row in unitBreakdown(selectedBP)"
@@ -359,7 +359,7 @@ const unitBreakdown = (bp: Blueprint) =>
               <span
                 v-if="row.qs === 0"
                 style="color: var(--text3); font-style: italic"
-              >no allocation</span>
+              >no max — uncapped</span>
               <span
                 v-else
                 style="
@@ -369,7 +369,7 @@ const unitBreakdown = (bp: Blueprint) =>
                 "
               >
                 <template v-for="(a, ai) in row.allocs" :key="ai">
-                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>{{ a.count }}×{{ a.marks }}M
+                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>≤{{ a.count }}×{{ a.marks }}M
                 </template>
                 <span style="color: var(--text3); margin-left: 8px">= {{ row.qs }}Q / {{ row.marks }}M</span>
               </span>

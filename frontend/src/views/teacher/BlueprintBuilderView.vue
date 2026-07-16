@@ -206,7 +206,7 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
                 letter-spacing: 0.04em;
                 text-transform: uppercase;
               "
-            >Unit Allocation</div>
+            >Unit Maximums</div>
             <div
               v-for="row in unitBreakdown(bp)"
               :key="row.unit"
@@ -216,7 +216,7 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
               <span
                 v-if="row.qs === 0"
                 style="color: var(--text3); font-style: italic; font-size: 11px"
-              >no allocation</span>
+              >no max — uncapped</span>
               <span
                 v-else
                 style="
@@ -227,7 +227,7 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
                 "
               >
                 <template v-for="(a, ai) in row.allocs" :key="ai">
-                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>{{ a.count }}×{{ a.marks }}M
+                  <span v-if="ai > 0" style="color: var(--text3)"> · </span>≤{{ a.count }}×{{ a.marks }}M
                 </template>
               </span>
             </div>

@@ -72,41 +72,50 @@ class GenerationResult
     }
 
     /**
-     * True when the shortfall cannot be fixed by adding questions to the bank,
-     * because the unit-coverage rule demands more distinct units than the paper has
-     * slots (each slot holds one question, so at most one unit apiece). AI bank
-     * expansion adds questions, not slots, so it is futile here — the teacher must
-     * add questions to the blueprint or enable fewer units.
+     * True when the shortfall cannot be fixed by adding questions to the bank:
+     * either the coverage rule demands more units than the paper can ever reach
+     * (a question — including an AI-generated one — spans at most
+     * MAX_AI_UNITS_PER_QUESTION units), or the per-unit maximums cannot fill
+     * every slot. AI bank expansion adds questions, not slots or cap headroom,
+     * so it is futile here — the teacher must adjust the blueprint.
      */
     public function coverageStructurallyInfeasible(): bool
     {
-        return count($this->blueprint->allowedUnitIds) > count($this->blueprint->slots);
+        return $this->blueprint->structurallyInfeasible();
     }
 
-    /** How many more question slots the coverage rule needs, or 0 when it fits. */
+    /** Allowed units beyond the paper's coverage capacity, or 0 when it fits. */
     public function coverageSlotDeficit(): int
     {
-        return max(0, count($this->blueprint->allowedUnitIds) - count($this->blueprint->slots));
+        return $this->blueprint->coverageCapacityDeficit();
     }
 
     /**
-     * A plain-language explanation for a structurally-infeasible coverage rule, or
+     * A plain-language explanation for a structurally-infeasible blueprint, or
      * null when the shortfall is an ordinary (expandable) bank deficit.
      */
     public function coverageDeficitMessage(): ?string
     {
-        if (! $this->coverageStructurallyInfeasible()) {
-            return null;
-        }
-
         $units = count($this->blueprint->allowedUnitIds);
         $slots = count($this->blueprint->slots);
-        $deficit = $this->coverageSlotDeficit();
-        $questions = $deficit === 1 ? 'question' : 'questions';
-        $unitWord = $deficit === 1 ? 'unit' : 'units';
 
-        return "This blueprint requires all {$units} enabled units, but it only has {$slots} questions — "
-            ."a question can cover just one unit. Add at least {$deficit} more {$questions}, or enable "
-            ."{$deficit} fewer {$unitWord}. AI can't fix this: it adds questions to the bank, not slots to the paper.";
+        if ($this->blueprint->coverageCapacityDeficit() > 0) {
+            $capacity = CompiledBlueprint::MAX_AI_UNITS_PER_QUESTION * $slots;
+
+            return "This blueprint requires all {$units} enabled units, but it only has {$slots} question "
+                ."slots — even with questions spanning two units, at most {$capacity} units can be covered. "
+                .'Add more questions to the blueprint or enable fewer units. AI can\'t fix this: it adds '
+                .'questions to the bank (covering at most two units each), not slots to the paper.';
+        }
+
+        if ($this->blueprint->capDeficit() > 0) {
+            $capSum = array_sum($this->blueprint->unitCaps);
+
+            return "The per-unit maximums allow only {$capSum} questions in total, but the paper has "
+                ."{$slots} slots. Raise some unit maximums or remove them. AI can't fix this: every "
+                .'generated question would still count against a full unit.';
+        }
+
+        return null;
     }
 }

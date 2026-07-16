@@ -90,6 +90,10 @@ class GenerateQuestionsRequest(BaseModel):
     type: QuestionType
     marks: int
     count: int = Field(ge=1, le=25)
+    # Target unit names for the prompt (0–2). Two names ask for questions that
+    # span BOTH units. Never echoed back — Laravel is authoritative for units
+    # and stamps them on save, exactly as it does for type and marks.
+    units: list[str] = Field(default_factory=list, max_length=2)
 
 
 class GeneratedQuestion(BaseModel):

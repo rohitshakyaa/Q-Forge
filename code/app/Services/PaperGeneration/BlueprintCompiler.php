@@ -11,9 +11,9 @@ use App\Services\PaperGeneration\Support\Slot;
  * Turns a stored blueprint's `definition` JSON into the engine's inputs.
  *
  * Sections are authoritative for the paper structure (ordered slots). unitRules
- * is both the hard candidate filter and the coverage rule. unitAllocations is a
- * soft balancing hint only. The 42-vs-50 mismatch between allocations and
- * sections in seeded data is therefore harmless — allocations are never enforced.
+ * is both the hard candidate filter and the coverage rule. unitAllocations
+ * counts compile into per-unit MAX caps (a unit without rows is uncapped); the
+ * marks column in those rows stays display-only and is never enforced.
  */
 class BlueprintCompiler
 {
@@ -30,7 +30,7 @@ class BlueprintCompiler
 
         $slots = $this->buildSlots($sections);
         $allowedUnitIds = $this->resolveAllowedUnits($definition['unitRules'] ?? [], $unitsByName->all());
-        $unitAllocations = $this->resolveAllocations($definition['unitAllocations'] ?? [], $unitsByName->all());
+        $unitCaps = $this->resolveCaps($definition['unitAllocations'] ?? [], $unitsByName->all(), $allowedUnitIds);
         $lastNPapers = (int) ($definition['exclusionRules']['lastNPapers'] ?? 0);
 
         return new CompiledBlueprint(
@@ -39,7 +39,7 @@ class BlueprintCompiler
             slots: $slots,
             allowedUnitIds: $allowedUnitIds,
             unitNames: $unitNames,
-            unitAllocations: $unitAllocations,
+            unitCaps: $unitCaps,
             lastNPapers: $lastNPapers,
         );
     }
@@ -95,21 +95,39 @@ class BlueprintCompiler
     }
 
     /**
-     * Re-key unitAllocations from unit name to unit id (soft prefs only).
+     * Compile unitAllocations counts into per-unit MAX caps: a unit's cap is
+     * the sum of its rows' counts. Only allowed units can carry a cap (rows for
+     * a disabled unit are dropped); a unit with no rows, or rows summing to <= 0,
+     * is uncapped. The marks column is display-only and ignored here.
      *
      * @param  array<string, int>  $unitsByName
-     * @return array<int, array<int, array{marks:int, count:int}>>
+     * @param  int[]  $allowedUnitIds
+     * @return array<int, int>  unitId => max questions
      */
-    private function resolveAllocations(array $allocations, array $unitsByName): array
+    private function resolveCaps(array $allocations, array $unitsByName, array $allowedUnitIds): array
     {
-        $byId = [];
+        $caps = [];
         foreach ($allocations as $name => $rows) {
-            if (isset($unitsByName[$name])) {
-                $byId[(int) $unitsByName[$name]] = $rows;
+            if (! isset($unitsByName[$name])) {
+                continue;
+            }
+
+            $unitId = (int) $unitsByName[$name];
+            if (! in_array($unitId, $allowedUnitIds, true)) {
+                continue;
+            }
+
+            $cap = 0;
+            foreach ((array) $rows as $row) {
+                $cap += (int) ($row['count'] ?? 0);
+            }
+
+            if ($cap > 0) {
+                $caps[$unitId] = $cap;
             }
         }
 
-        return $byId;
+        return $caps;
     }
 
     /** Normalize a section's display type to a question `type` enum value. */

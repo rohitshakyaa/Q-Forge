@@ -91,12 +91,22 @@ const totalAllocatedQs = computed(() =>
     .reduce((s, [, arr]) => s + arr.reduce((x, a) => x + (a.count || 0), 0), 0),
 );
 
-const allocationDeficit = computed(() => totalQuestions.value - totalAllocatedQs.value);
+// Allocations are per-unit MAXIMUMS (enforced by the generator): a unit with no
+// rows is uncapped. The only structurally impossible configuration is when EVERY
+// enabled unit is capped and the caps sum below the paper's question count.
+const enabledUnits = computed(() => Object.keys(bp.unitRules).filter((u) => bp.unitRules[u]));
+
+const allUnitsCapped = computed(
+  () => enabledUnits.value.length > 0 && enabledUnits.value.every((u) => unitTotal(u) > 0),
+);
+
+const capShortfall = computed(() =>
+  allUnitsCapped.value ? Math.max(0, totalQuestions.value - totalAllocatedQs.value) : 0,
+);
 
 const allocationColor = computed(() => {
-  if (allocationDeficit.value === 0) return { bg: 'var(--success-dim)', fg: 'var(--success)' };
-  if (allocationDeficit.value > 0) return { bg: 'var(--warn-dim)', fg: 'var(--warn)' };
-  return { bg: 'var(--danger-dim)', fg: 'var(--danger)' };
+  if (capShortfall.value > 0) return { bg: 'var(--danger-dim)', fg: 'var(--danger)' };
+  return { bg: 'var(--success-dim)', fg: 'var(--success)' };
 });
 
 const addAllocation = (unit: string) => {
@@ -109,11 +119,9 @@ const removeAllocation = (unit: string, idx: number) => {
 };
 
 const setAllocationCount = (unit: string, idx: number, raw: number) => {
-  const current = bp.unitAllocations[unit][idx];
   const requested = Math.max(0, Math.floor(raw || 0));
-  const othersTotal = totalAllocatedQs.value - (current.count || 0);
-  const remaining = Math.max(0, totalQuestions.value - othersTotal);
-  current.count = Math.min(requested, remaining);
+  // A max can't usefully exceed the paper's question count.
+  bp.unitAllocations[unit][idx].count = Math.min(requested, totalQuestions.value);
 };
 
 const setAllocationMarks = (unit: string, idx: number, raw: string | number) => {
@@ -165,7 +173,7 @@ const next = () => {
 
 const canContinue = computed(() => {
   if (step.current === 1) return deficit.value === 0;
-  if (step.current === 2) return allocationDeficit.value === 0;
+  if (step.current === 2) return capShortfall.value === 0;
   return true;
 });
 
@@ -175,10 +183,8 @@ const continueBlockedReason = computed(() => {
       ? `Allocate ${deficit.value} more mark${deficit.value === 1 ? '' : 's'} to continue`
       : `Over-allocated by ${-deficit.value} marks — reduce to continue`;
   }
-  if (step.current === 2 && allocationDeficit.value !== 0) {
-    return allocationDeficit.value > 0
-      ? `Allocate ${allocationDeficit.value} more question${allocationDeficit.value === 1 ? '' : 's'} to continue`
-      : `Over-allocated by ${-allocationDeficit.value} questions — reduce to continue`;
+  if (step.current === 2 && capShortfall.value > 0) {
+    return `Your unit maximums allow only ${totalAllocatedQs.value} of ${totalQuestions.value} questions — raise some maximums or leave a unit uncapped`;
   }
   return '';
 });
@@ -377,10 +383,10 @@ const exclusionRules = [
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px">
           <div>
             <div style="font-family: var(--font-head); font-weight: 600; font-size: 15px">
-              Unit Coverage & Allocation
+              Unit Coverage & Maximums
             </div>
             <div style="color: var(--text3); font-size: 12.5px; margin-top: 2px">
-              Toggle units and set how many questions of each marks value come from each
+              Toggle units and optionally cap how many questions may come from each
             </div>
           </div>
           <div
@@ -394,20 +400,18 @@ const exclusionRules = [
               fontWeight: 600,
             }"
           >
-            {{ totalAllocatedQs }}/{{ totalQuestions }} questions
+            {{ allUnitsCapped ? `max ${totalAllocatedQs} / ${totalQuestions} questions` : `${totalQuestions} questions` }}
           </div>
         </div>
 
         <div v-if="availableMarks.length === 0" style="margin-bottom: 12px">
           <QFAIHint>
-            Add at least one section in the previous step to unlock unit allocations.
+            Add at least one section in the previous step to unlock unit maximums.
           </QFAIHint>
         </div>
-        <div v-else-if="allocationDeficit !== 0" style="margin-bottom: 12px">
+        <div v-else-if="capShortfall > 0" style="margin-bottom: 12px">
           <QFAIHint>
-            {{ allocationDeficit > 0
-              ? `${allocationDeficit} question${allocationDeficit === 1 ? '' : 's'} still to be allocated across units.`
-              : `Over-allocated by ${-allocationDeficit} questions.` }}
+            {{ `Every unit is capped and the maximums only allow ${totalAllocatedQs} of ${totalQuestions} questions — raise some maximums or leave a unit uncapped.` }}
           </QFAIHint>
         </div>
 
@@ -450,7 +454,7 @@ const exclusionRules = [
                     color: var(--text2);
                   "
                 >
-                  {{ unitTotal(unit) }} Qs · {{ unitMarks(unit) }} marks
+                  {{ unitTotal(unit) > 0 ? `≤ ${unitTotal(unit)} Qs · ≤ ${unitMarks(unit)} marks` : 'no max' }}
                 </span>
               </div>
 
@@ -469,7 +473,7 @@ const exclusionRules = [
                   v-if="bp.unitAllocations[unit].length === 0"
                   style="color: var(--text3); font-size: 12.5px; font-style: italic"
                 >
-                  No questions allocated yet.
+                  No maximum set — this unit is uncapped.
                 </div>
                 <div
                   v-for="(alloc, idx) in bp.unitAllocations[unit]"
@@ -484,7 +488,7 @@ const exclusionRules = [
                   />
                   <QFInput
                     :model-value="alloc.count"
-                    label="No. of questions"
+                    label="Max questions"
                     type="number"
                     @update:model-value="(v) => setAllocationCount(unit, idx, +v)"
                   />
@@ -506,13 +510,9 @@ const exclusionRules = [
                   <QFButton
                     variant="secondary"
                     size="sm"
-                    :disabled="availableMarks.length === 0 || allocationDeficit <= 0"
+                    :disabled="availableMarks.length === 0"
                     @click="addAllocation(unit)"
                   >+ Add row</QFButton>
-                  <span
-                    v-if="allocationDeficit <= 0 && availableMarks.length > 0"
-                    style="margin-left: 10px; color: var(--text3); font-size: 12px"
-                  >All questions allocated.</span>
                 </div>
               </div>
             </div>
@@ -521,9 +521,10 @@ const exclusionRules = [
 
         <div style="margin-top: 14px">
           <QFAIHint>
-            <strong style="color: var(--ai)">Tip:</strong> Distribute the paper's
-            {{ totalQuestions }} question{{ totalQuestions === 1 ? '' : 's' }} across required units.
-            Mark values come from the sections you defined.
+            <strong style="color: var(--ai)">Tip:</strong> Maximums are optional — an uncapped
+            unit can hold any number of the paper's
+            {{ totalQuestions }} question{{ totalQuestions === 1 ? '' : 's' }}. Every enabled unit
+            is still guaranteed at least one question. Mark values come from the sections you defined.
           </QFAIHint>
         </div>
       </div>

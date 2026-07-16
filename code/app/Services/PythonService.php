@@ -61,14 +61,18 @@ class PythonService
 
     /**
      * Ask Python to author `count` candidate questions from a Laravel-assembled
-     * grounding block (M5). Returns the valid subset in `data` and any malformed
-     * items in `errors` — partial success is normal and never discarded.
+     * grounding block (M5). `$unitNames` (0–2) names the target units in the
+     * prompt — two names ask for questions spanning both; the response never
+     * echoes units, Laravel stays authoritative and stamps them on save.
+     * Returns the valid subset in `data` and any malformed items in `errors` —
+     * partial success is normal and never discarded.
      *
+     * @param  string[]  $unitNames
      * @return array{data: array<int, array<string, mixed>>, errors: array<int, string>}
      *
      * @throws RuntimeException when the service is unreachable or reports failure.
      */
-    public function generateQuestions(string $grounding, string $type, int $marks, int $count): array
+    public function generateQuestions(string $grounding, string $type, int $marks, int $count, array $unitNames = []): array
     {
         $response = $this->client()
             ->timeout((int) config('services.python.generate_timeout'))
@@ -77,6 +81,7 @@ class PythonService
                 'type' => $type,
                 'marks' => $marks,
                 'count' => $count,
+                'units' => $unitNames,
             ]);
 
         if ($response->failed()) {

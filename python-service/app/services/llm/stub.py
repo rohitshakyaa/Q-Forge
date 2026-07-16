@@ -12,11 +12,26 @@ MALFORMED_SENTINEL = "__EMIT_MALFORMED__"
 
 
 class StubProvider(LLMProvider):
-    def generate(self, *, grounding: str, type: str, marks: int, count: int) -> list[dict]:
+    def generate(
+        self,
+        *,
+        grounding: str,
+        type: str,
+        marks: int,
+        count: int,
+        units: list[str] | None = None,
+    ) -> list[dict]:
+        # Echo the target units into the text so tests can assert the plumbing
+        # end-to-end (Laravel -> request -> provider) without a real model.
+        scope = f" [{' + '.join(units)}]" if units else ""
+
         items: list[dict] = []
         for i in range(count):
             item = {
-                "text": f"[stub] Question {i + 1}: explain a key idea from the provided syllabus.",
+                "text": (
+                    f"[stub] Question {i + 1}: explain a key idea "
+                    f"from the provided syllabus.{scope}"
+                ),
                 "type": type,
                 "marks": marks,
             }

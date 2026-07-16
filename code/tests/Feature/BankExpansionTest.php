@@ -90,7 +90,7 @@ class BankExpansionTest extends TestCase
             ->assertOk()
             ->assertJsonPath('satisfiable', false)
             ->assertJsonPath('slots.0.type', 'long')
-            ->assertJsonPath('slots.0.unit_id', $unit->id);
+            ->assertJsonPath('slots.0.unit_ids.0', $unit->id);
 
         Bus::assertBatched(fn ($batch) => $batch->jobs->first() instanceof ExpandQuestionBank
             && $batch->name === "expand-bank:{$blueprint->id}:{$teacher->id}");
@@ -144,7 +144,7 @@ class BankExpansionTest extends TestCase
         $this->fakePython(count: 4);
         $slots = array_map(fn ($m) => [
             'section_label' => $m['section_label'], 'type' => $m['type'],
-            'marks' => $m['marks'], 'unit_id' => $m['unit_id'], 'need' => $m['need'],
+            'marks' => $m['marks'], 'unit_ids' => $m['unit_ids'], 'need' => $m['need'],
         ], $missing);
 
         (new ExpandQuestionBank($blueprint->id, $slots))
@@ -184,7 +184,7 @@ class BankExpansionTest extends TestCase
 
         $slots = array_map(fn ($m) => [
             'section_label' => $m['section_label'], 'type' => $m['type'],
-            'marks' => $m['marks'], 'unit_id' => $m['unit_id'], 'need' => $m['need'],
+            'marks' => $m['marks'], 'unit_ids' => $m['unit_ids'], 'need' => $m['need'],
         ], $missing);
 
         (new ExpandQuestionBank($blueprint->id, $slots))
@@ -213,7 +213,7 @@ class BankExpansionTest extends TestCase
 
         $slots = [[
             'section_label' => 'Section B', 'type' => 'long', 'marks' => 10,
-            'unit_id' => $unit->id, 'need' => 2,
+            'unit_ids' => [$unit->id], 'need' => 2,
         ]];
 
         (new ExpandQuestionBank($blueprint->id, $slots))
@@ -241,7 +241,7 @@ class BankExpansionTest extends TestCase
 
         $slots = [[
             'section_label' => 'Section B', 'type' => 'long', 'marks' => 10,
-            'unit_id' => $unit->id, 'need' => 2,
+            'unit_ids' => [$unit->id], 'need' => 2,
         ]];
 
         (new ExpandQuestionBank($blueprint->id, $slots))
@@ -266,9 +266,10 @@ class BankExpansionTest extends TestCase
         $teacher = User::factory()->create(['role' => 'teacher']);
         $subject = Subject::factory()->create();
 
-        // 5 mandated units but only 3 question slots — coverage can never pass, so no
-        // amount of AI bank expansion can help. The endpoint must not dispatch a job.
-        $units = collect(range(1, 5))->map(fn ($n) => Unit::factory()->for($subject)->create([
+        // 7 mandated units but only 3 question slots — even two-unit questions top out
+        // at 6 covered units, so no amount of AI bank expansion can help. The endpoint
+        // must not dispatch a job.
+        $units = collect(range(1, 7))->map(fn ($n) => Unit::factory()->for($subject)->create([
             'name' => "Unit {$n}", 'position' => $n,
         ]));
         foreach ($units as $unit) {
@@ -293,11 +294,84 @@ class BankExpansionTest extends TestCase
         Bus::assertNothingBatched();
     }
 
+    public function test_expand_dispatches_when_units_exceed_slots_but_two_unit_questions_can_cover(): void
+    {
+        // 5 units / 3 slots used to be refused as structurally infeasible ("a question
+        // can cover just one unit"). With multi-unit questions 5 <= 2×3, so this is now
+        // an ordinary expandable shortfall — the behavioural fix for the coverage issue.
+        Bus::fake();
+        $teacher = User::factory()->create(['role' => 'teacher']);
+        $subject = Subject::factory()->create();
+
+        $units = collect(range(1, 5))->map(fn ($n) => Unit::factory()->for($subject)->create([
+            'name' => "Unit {$n}", 'position' => $n,
+        ]));
+        foreach ($units as $unit) {
+            Question::factory()->count(2)->create([
+                'subject_id' => $subject->id, 'unit_id' => $unit->id,
+                'type' => 'long', 'marks' => 20, 'status' => 'approved',
+            ]);
+        }
+
+        $blueprint = $this->blueprintFor($teacher, $subject, [
+            ['name' => 'Section A', 'type' => 'Long Answer', 'count' => 3, 'marksEach' => 20],
+        ], $units->pluck('name')->all(), 60);
+
+        Sanctum::actingAs($teacher);
+
+        $response = $this->postJson("/api/blueprints/{$blueprint->id}/expand-bank")
+            ->assertOk()
+            ->assertJsonPath('satisfiable', false);
+
+        // Uncovered units beyond the slot count are requested as PAIRS so each
+        // AI question pulls coverage double duty.
+        $slots = $response->json('slots');
+        $this->assertNotEmpty($slots);
+        $paired = collect($slots)->first(fn ($s) => count($s['unit_ids']) === 2);
+        $this->assertNotNull($paired, 'expected at least one two-unit slot request');
+
+        Bus::assertBatched(fn ($batch) => $batch->jobs->first() instanceof ExpandQuestionBank);
+    }
+
+    public function test_job_stores_a_multi_unit_ai_question_tagging_both_units(): void
+    {
+        [, $subject, $unit, $blueprint] = $this->infeasibleSetup();
+        $other = Unit::factory()->for($subject)->create([
+            'name' => 'Unit 2', 'position' => 2, 'content' => '## Graphs\nBFS, DFS.',
+        ]);
+
+        $this->fakePython(count: 2);
+
+        // A pair-targeted slot: the question must span both units.
+        $slots = [[
+            'section_label' => 'Section B', 'type' => 'long', 'marks' => 10,
+            'unit_ids' => [$unit->id, $other->id], 'need' => 1,
+        ]];
+
+        (new ExpandQuestionBank($blueprint->id, $slots))
+            ->handle(app(PythonService::class), app(GroundingBuilder::class));
+
+        $ai = Question::where('source', 'ai')->get();
+        $this->assertGreaterThanOrEqual(1, $ai->count());
+
+        // Primary = first (scarcest) target unit; BOTH units tagged on the pivot.
+        $first = $ai->first();
+        $this->assertSame($unit->id, $first->unit_id);
+        $this->assertEqualsCanonicalizing(
+            [$unit->id, $other->id],
+            $first->units()->pluck('units.id')->all(),
+        );
+
+        // The units were passed to Python for the prompt.
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'generate-questions')
+            && $request['units'] === ['Unit 1', 'Unit 2']);
+    }
+
     public function test_generate_flags_a_structural_shortfall_as_not_expandable(): void
     {
         $teacher = User::factory()->create(['role' => 'teacher']);
         $subject = Subject::factory()->create();
-        $units = collect(range(1, 5))->map(fn ($n) => Unit::factory()->for($subject)->create([
+        $units = collect(range(1, 7))->map(fn ($n) => Unit::factory()->for($subject)->create([
             'name' => "Unit {$n}", 'position' => $n,
         ]));
         foreach ($units as $unit) {

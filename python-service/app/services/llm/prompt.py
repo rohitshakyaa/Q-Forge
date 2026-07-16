@@ -3,8 +3,11 @@
 _KIND = {"short": "short-answer", "long": "long-answer", "mcq": "multiple-choice"}
 
 
-def build_prompt(*, grounding: str, type: str, marks: int, count: int) -> str:
+def build_prompt(
+    *, grounding: str, type: str, marks: int, count: int, units: list[str] | None = None
+) -> str:
     kind = _KIND.get(type, type)
+    units = units or []
 
     if type == "mcq":
         item_shape = (
@@ -17,6 +20,17 @@ def build_prompt(*, grounding: str, type: str, marks: int, count: int) -> str:
     else:
         item_shape = f'{{"text": "...", "type": "{type}", "marks": {marks}}}'
         extra = ""
+
+    # Unit targeting: one unit pins the topic; two units demand a genuinely
+    # integrative question (the caller uses this to close a coverage gap where
+    # the paper has fewer slots than units to cover).
+    if len(units) == 1:
+        extra += f' Every question must be about the unit "{units[0]}".'
+    elif len(units) >= 2:
+        extra += (
+            f' Every question must genuinely integrate material from BOTH units: "{units[0]}" '
+            f'and "{units[1]}". A question answerable using only one of them is invalid.'
+        )
 
     return (
         "You are an examiner authoring questions for a university course. Using ONLY the "

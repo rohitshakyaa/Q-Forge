@@ -37,8 +37,9 @@ class PaperGeneratorTest extends TestCase
      *
      * @param  array<int, array{name:string, type:string, count:int, marksEach:int}>  $sections
      * @param  string[]  $allowedUnitNames
+     * @param  array<string, array<int, array{marks:int, count:int}>>  $unitAllocations  per-unit MAX cap rows
      */
-    private function makeBlueprint(Subject $subject, array $sections, array $allowedUnitNames, int $totalMarks): Blueprint
+    private function makeBlueprint(Subject $subject, array $sections, array $allowedUnitNames, int $totalMarks, array $unitAllocations = []): Blueprint
     {
         $sectionDefs = [];
         foreach ($sections as $i => $s) {
@@ -65,7 +66,7 @@ class PaperGeneratorTest extends TestCase
                 'definition' => [
                     'sections' => $sectionDefs,
                     'unitRules' => $unitRules,
-                    'unitAllocations' => [],
+                    'unitAllocations' => $unitAllocations,
                     'exclusionRules' => ['lastNPapers' => 0, 'reuseThreshold' => 3],
                 ],
             ]);
@@ -269,6 +270,218 @@ class PaperGeneratorTest extends TestCase
         $coveredUnitIds = collect($result->selections)->map(fn (Question $q) => $q->unit_id)->unique();
         $this->assertEqualsCanonicalizing([$u1->id, $u2->id], $coveredUnitIds->all());
         $this->assertTrue($validator->allPass($result->constraintResults));
+    }
+
+    public function test_coverage_aware_greedy_covers_all_units_without_needing_backtracking(): void
+    {
+        // Same starvation setup as the backtracking test: LRU-only greedy would fill
+        // both slots from fresh Unit 1 and starve Unit 2. The coverage-aware greedy
+        // must prefer the stale Unit 2 question for uncovered-unit rank and produce
+        // a valid paper on the FIRST pass (proved by driving greedyFill's logic via
+        // pick() with the uncovered set, not just the end result).
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        $u2 = Unit::factory()->for($subject)->create(['name' => 'Unit 2', 'position' => 2]);
+
+        $this->seedQuestions($subject, $u1, 'short', 4, 2, usedCount: 0);
+        $this->seedQuestions($subject, $u2, 'short', 4, 1, usedCount: 5);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], ['Unit 1', 'Unit 2'], 8);
+
+        $compiler = new BlueprintCompiler;
+        $filter = new CandidateFilter;
+        $selector = new GreedySelector;
+
+        $compiled = $compiler->compile($blueprint);
+        $covered = [];
+        $usedIds = [];
+        $picks = [];
+        foreach ($compiled->slots as $slot) {
+            $uncovered = array_values(array_diff($compiled->allowedUnitIds, $covered));
+            $pick = $selector->pick($filter->for($slot, $compiled, $usedIds), $uncovered);
+            $picks[] = $pick;
+            $usedIds[] = $pick->id;
+            $covered = array_merge($covered, $pick->taggedUnitIds());
+        }
+
+        $greedyCoverage = collect($picks)->flatMap(fn (Question $q) => $q->taggedUnitIds())->unique();
+        $this->assertEqualsCanonicalizing([$u1->id, $u2->id], $greedyCoverage->all(),
+            'Coverage-aware greedy still starved a unit.');
+    }
+
+    public function test_unit_cap_limits_how_many_questions_a_unit_contributes(): void
+    {
+        // Unit 1 is rich and fresh; Unit 2 thin and stale. Uncapped, Unit 1 would fill
+        // 3 of the 4 slots. Capped at 2, exactly 2 of the paper's questions may tag it.
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        $u2 = Unit::factory()->for($subject)->create(['name' => 'Unit 2', 'position' => 2]);
+
+        $this->seedQuestions($subject, $u1, 'short', 4, 4, usedCount: 0);
+        $this->seedQuestions($subject, $u2, 'short', 4, 3, usedCount: 5);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 4, 'marksEach' => 4],
+        ], ['Unit 1', 'Unit 2'], 16, unitAllocations: [
+            'Unit 1' => [['marks' => 4, 'count' => 2]],
+        ]);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        $u1Count = collect($result->selections)
+            ->filter(fn (Question $q) => in_array($u1->id, $q->taggedUnitIds(), true))
+            ->count();
+        $this->assertLessThanOrEqual(2, $u1Count, 'Unit cap was exceeded.');
+
+        $maximums = collect($result->constraintResults)->firstWhere('label', 'Unit maximums');
+        $this->assertNotNull($maximums);
+        $this->assertTrue($maximums->pass);
+    }
+
+    public function test_a_multi_unit_question_counts_toward_every_tagged_capped_unit(): void
+    {
+        // One question spans Units 1+2, both capped at 1. Selecting it exhausts BOTH
+        // caps, so the remaining slot must come from Unit 3.
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        $u2 = Unit::factory()->for($subject)->create(['name' => 'Unit 2', 'position' => 2]);
+        $u3 = Unit::factory()->for($subject)->create(['name' => 'Unit 3', 'position' => 3]);
+
+        $spanning = Question::factory()->create([
+            'subject_id' => $subject->id, 'unit_id' => $u1->id,
+            'type' => 'short', 'marks' => 4, 'status' => 'approved', 'used_count' => 0,
+        ]);
+        $spanning->syncUnitLinks([$u1->id, $u2->id]);
+        $this->seedQuestions($subject, $u1, 'short', 4, 2, usedCount: 1);
+        $this->seedQuestions($subject, $u2, 'short', 4, 2, usedCount: 1);
+        $this->seedQuestions($subject, $u3, 'short', 4, 2, usedCount: 1);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], ['Unit 1', 'Unit 2', 'Unit 3'], 8, unitAllocations: [
+            'Unit 1' => [['marks' => 4, 'count' => 1]],
+            'Unit 2' => [['marks' => 4, 'count' => 1]],
+        ]);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        $selections = collect($result->selections);
+        $this->assertContains($spanning->id, $selections->map(fn (Question $q) => $q->id)->all(),
+            'The spanning question is the only way to cover 3 units in 2 slots.');
+
+        $useByUnit = $selections->flatMap(fn (Question $q) => $q->taggedUnitIds())->countBy();
+        $this->assertLessThanOrEqual(1, $useByUnit->get($u1->id, 0));
+        $this->assertLessThanOrEqual(1, $useByUnit->get($u2->id, 0));
+    }
+
+    public function test_caps_summing_below_the_slot_count_are_structurally_infeasible(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        $u2 = Unit::factory()->for($subject)->create(['name' => 'Unit 2', 'position' => 2]);
+
+        $this->seedQuestions($subject, $u1, 'short', 4, 5);
+        $this->seedQuestions($subject, $u2, 'short', 4, 5);
+
+        // 4 slots but every unit capped and caps sum to 3 — no assignment can exist,
+        // and AI expansion can't help (every new question hits a full unit).
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 4, 'marksEach' => 4],
+        ], ['Unit 1', 'Unit 2'], 16, unitAllocations: [
+            'Unit 1' => [['marks' => 4, 'count' => 2]],
+            'Unit 2' => [['marks' => 4, 'count' => 1]],
+        ]);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertFalse($result->satisfiable);
+        $this->assertTrue($result->coverageStructurallyInfeasible());
+        $this->assertStringContainsString('maximums', (string) $result->coverageDeficitMessage());
+    }
+
+    public function test_multi_unit_questions_cover_more_units_than_slots(): void
+    {
+        // The supervisor scenario in miniature: 3 mandated units, 2 slots. Impossible
+        // with single-unit questions; a Units 2+3 spanning question makes it valid.
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        $u2 = Unit::factory()->for($subject)->create(['name' => 'Unit 2', 'position' => 2]);
+        $u3 = Unit::factory()->for($subject)->create(['name' => 'Unit 3', 'position' => 3]);
+
+        $this->seedQuestions($subject, $u1, 'short', 4, 2);
+        $spanning = Question::factory()->create([
+            'subject_id' => $subject->id, 'unit_id' => $u2->id,
+            'type' => 'short', 'marks' => 4, 'status' => 'approved', 'used_count' => 0,
+        ]);
+        $spanning->syncUnitLinks([$u2->id, $u3->id]);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], ['Unit 1', 'Unit 2', 'Unit 3'], 8);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        $covered = collect($result->selections)->flatMap(fn (Question $q) => $q->taggedUnitIds())->unique();
+        $this->assertEqualsCanonicalizing([$u1->id, $u2->id, $u3->id], $covered->all());
+    }
+
+    public function test_missing_slots_pair_the_scarcest_units_when_units_exceed_slots(): void
+    {
+        // 4 mandated units, 2 slots, only single-unit supply: infeasible, and the
+        // shortfall must request PAIRED units (units − slots = 2 pairs of the four
+        // scarcest) so the AI top-up can close the gap in one round.
+        $subject = Subject::factory()->create();
+        $units = collect(range(1, 4))->map(fn ($n) => Unit::factory()->for($subject)->create([
+            'name' => "Unit {$n}", 'position' => $n,
+        ]));
+        foreach ($units as $u) {
+            $this->seedQuestions($subject, $u, 'short', 4, 2);
+        }
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], $units->pluck('name')->all(), 8);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertFalse($result->satisfiable);
+        $this->assertFalse($result->coverageStructurallyInfeasible(), '4 units ≤ 2×2 slots is fixable.');
+        $this->assertNotEmpty($result->missingSlots);
+        foreach ($result->missingSlots as $missing) {
+            $this->assertCount(2, $missing->unitIds, 'Expected pair-targeted missing slots.');
+        }
+        // Deterministic pairing: equal supply ties break by ascending unit id.
+        $this->assertSame(
+            [[$units[0]->id, $units[1]->id], [$units[2]->id, $units[3]->id]],
+            array_map(fn ($m) => $m->unitIds, $result->missingSlots),
+        );
+    }
+
+    public function test_empty_unit_rules_leave_coverage_and_caps_inert(): void
+    {
+        // Regression: with no unitRules there is no coverage rule and caps are ignored
+        // even if allocation rows exist — behaviour identical to plain LRU.
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        $this->seedQuestions($subject, $u1, 'short', 4, 3);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 3, 'marksEach' => 4],
+        ], [], 12, unitAllocations: [
+            'Unit 1' => [['marks' => 4, 'count' => 1]], // must be ignored: unit not enabled
+        ]);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        $this->assertCount(3, $result->selections);
+        $this->assertNull(collect($result->constraintResults)->firstWhere('label', 'Unit maximums'));
+        $this->assertNull(collect($result->constraintResults)->firstWhere('label', 'Unit coverage'));
     }
 
     public function test_imported_exam_ages_out_of_the_rolling_window(): void

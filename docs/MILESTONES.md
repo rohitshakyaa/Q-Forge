@@ -39,7 +39,8 @@ has no per-entity fill colour, so "new" is marked textually rather than by shadi
 | M4 — PDF pipeline | Done | Python `POST /extract` (pdfplumber + per-page Tesseract OCR fallback + heuristic parser) in `python-service/app/`; `document_uploads` + `ProcessDocumentUpload` on Redis/Horizon; `POST/GET/DELETE /uploads`; review queue (`approve`/`reject` + bulk) gated so a candidate missing a unit or marks cannot be approved. `questions.unit_id`/`marks` now nullable. 89 Laravel tests (+43) and 51 pytest tests green. Upload + Review Queue screens wired to the live API. |
 | M4.1 — Syllabus import | Done | Python `services/syllabus.py` parses a syllabus into courses + units (`number`, `name`, `hours`, markdown `content`) and returns them as `courses[]` from `/extract`; staged in `document_uploads.meta.courses`; admin confirms at `/admin/syllabus/:uploadId`; transactional `POST /uploads/{id}/import` → `SyllabusImporter`. New `units.hours` + `units.content`; `subjects.syllabus` now holds the course as markdown (M5's corpus). Import is additive and idempotent — it never deletes a unit, because `questions.unit_id` cascades. 112 Laravel tests (+23) and 97 pytest (+30) green. See [`adr/0002-syllabus-import.md`](adr/0002-syllabus-import.md). |
 | M5 — AI bank expansion | Done | `qforge_ollama` (Ollama, `qwen2.5:3b-instruct`, auto-pull entrypoint) on `local`; Python `POST /generate-questions` + `LLMProvider` (`OllamaProvider` default + `StubProvider`, env-selected). Laravel **`POST /blueprints/{id}/expand-bank`** (owner-scoped; re-derives `missing_slots` server-side) → `Bus::batch(ExpandQuestionBank)` → `{ jobId }`; poll `GET /jobs/{batchId}`. Job grounds each slot (`units.content`/`subjects.syllabus` + ≤3 approved exemplars), calls Python for `need+2`, stamps `type`/`marks` from the slot, resolves `unit_id`, stores `source=ai, status=approved`. `MissingSlot` enriched with server-set `unitId` (UnitResolver not used — it parses "Unit N" headings, not names). Tests green (stub provider). Generate screen "Expand bank with AI" wired. |
-| Post-M5 — Multi-unit questions | Done | New `question_unit` pivot (backfilled): `questions.unit_id` stays the **primary** unit and always appears in the pivot. Generator filters on **any-overlap** with allowed units; one multi-unit question covers every allowed unit it is tagged with (validator/backtracker/missing-slot union semantics); soft allocations stay primary-only. Paper snapshot picks the primary when allowed, else the lowest-id allowed tag. API: optional `unit_ids` (full set, must contain the primary, same subject) on create/update/approve; `QuestionResource` exposes `unit_ids` + `units`. Tags are human-assigned only — parser keeps its single `unit_hint`, AI expansion stays single-unit (zero Python changes). Bank UI lists each question once under its primary with "+ Unit" chips; unit filters match any tag; review/create forms gain "Also covers". 152 Laravel tests green (+11, `MultiUnitQuestionTest`). ER: [`diagrams/m5-schema.mmd`](diagrams/m5-schema.mmd). |
+| Post-M5 — Multi-unit questions | Done | New `question_unit` pivot (backfilled): `questions.unit_id` stays the **primary** unit and always appears in the pivot. Generator filters on **any-overlap** with allowed units; one multi-unit question covers every allowed unit it is tagged with (validator/backtracker/missing-slot union semantics); soft allocations stay primary-only. Paper snapshot picks the primary when allowed, else the lowest-id allowed tag. API: optional `unit_ids` (full set, must contain the primary, same subject) on create/update/approve; `QuestionResource` exposes `unit_ids` + `units`. Tags are human-assigned only — parser keeps its single `unit_hint`; ~~AI expansion stays single-unit~~ (superseded by Post-M5.1). Bank UI lists each question once under its primary with "+ Unit" chips; unit filters match any tag; review/create forms gain "Also covers". 152 Laravel tests green (+11, `MultiUnitQuestionTest`). ER: [`diagrams/m5-schema.mmd`](diagrams/m5-schema.mmd). |
+| Post-M5.1 — Coverage-aware greedy, unit maximums, multi-unit AI top-up | Done | Greedy now ranks uncovered-unit-first (same tuple as the backtracker: `[uncoveredRank, used_count, id]` — still deterministic; empty rules = pure LRU). `unitAllocations.count` promoted from dead data to **per-unit MAX caps** (unset = uncapped; `marks` stays display-only): greedy skips + backtracker prunes cap-busting candidates, validator adds a "Unit maximums" line. Structural guard corrected for multi-unit reality: coverage infeasible only when `units > 2×slots` (AI spans ≤ `MAX_AI_UNITS_PER_QUESTION = 2`); new cap-sum infeasibility (`Σcaps < slots` with every unit capped); generator skips the doomed backtrack when structural. `MissingSlot.unitId` → ordered `unitIds[]` (`unit_id` kept in payloads for back-compat): when `units > slots`, `computeMissingSlots` pairs the `2×(units−slots)` scarcest units so each AI question spans two. `ExpandQuestionBank` passes `unit_ids` through; survivor gets primary = first + both tagged via `syncUnitLinks`; `GroundingBuilder` takes 0–2 units (tag-aware exemplars, "span BOTH" directive); Python `/generate-questions` gains `units: list[str] (≤2)` → prompt "must genuinely integrate BOTH units" (response schema unchanged — Laravel stamps units). Blueprint editor step 2 relabelled to maximums (uncapped allowed; only blocks when all units capped and `Σcaps < totalQuestions`). 161 Laravel (+9) and 147 pytest (+3) green. No schema change — caps live in `blueprints.definition` JSON. |
 
 ---
 
@@ -753,8 +754,8 @@ stays the **primary** unit — the one the question is listed under and counted 
 - *Paper snapshot:* `paper_questions.unit_id` = primary when allowed, else the lowest-id allowed
   tag — a paper never labels a question with a unit the blueprint excluded.
 - *Tag source:* human-only (`unit_ids` on create/update/approve — full set, must contain the
-  primary, same subject). The Python parser keeps its single `unit_hint`; AI expansion stays
-  single-unit. **Zero Python-service changes.**
+  primary, same subject). The Python parser keeps its single `unit_hint`; ~~AI expansion stays
+  single-unit~~ *(superseded by Post-M5.1 below — the top-up can now tag two units)*.
 
 **Displayable product:** the bank lists each question once under its primary unit with "+ Unit"
 chips; unit filters match any tag; the review queue and Add Question modal gain an "Also covers"
@@ -762,6 +763,53 @@ multi-select; a Units 2+3 question is now selectable on a Unit-3-only blueprint 
 
 Cumulative ER updated in place: [`diagrams/m5-schema.mmd`](diagrams/m5-schema.mmd). Verified by
 `MultiUnitQuestionTest` (11 feature tests; 152 Laravel tests green).
+
+---
+
+## Post-M5.1 — Coverage-aware greedy, unit maximums, multi-unit AI top-up
+
+**Status: Done.**
+
+Closes the "cover all units" gap end-to-end. Post-M5 made multi-unit questions *representable*;
+this slice makes the engine *seek* coverage, lets teachers cap unit dominance, and teaches the AI
+top-up to author unit-spanning questions — so a blueprint with more mandated units than question
+slots (e.g. 12 units / 10 questions) is solvable instead of being declared impossible.
+
+**Engine:**
+- *Coverage-aware greedy:* `GreedySelector::pick(pool, uncoveredUnitIds)` ranks by the same tuple
+  the backtracker always used — `[coversUncoveredUnit ? 0 : 1, used_count, id]`. Deterministic;
+  with no unit rules it degenerates to the original pure LRU. (Design note: the doc-proposed
+  additive score `coverage×weight + difficulty + frequency − overload` was deliberately rejected —
+  each term maps to a hard rule instead: coverage → rank, frequency → last-N exclusion + LRU,
+  overload → caps below; difficulty deferred, blueprints define no difficulty mix.)
+- *Per-unit maximums:* `unitAllocations.count` — previously compiled-but-dead — is now a hard MAX
+  cap per unit (unset = uncapped; the `marks` column stays display-only). A multi-unit question
+  counts against every tagged capped unit. Enforced in greedy (pool reject), backtracker (prune)
+  and validator (new "Unit maximums" constraint line).
+- *Structural guard fixed:* was `units > slots ⇒ "AI can't fix this"` — false once a question can
+  span units. Now: coverage-infeasible only when `units > MAX_AI_UNITS_PER_QUESTION(2) × slots`;
+  cap-infeasible when every allowed unit is capped and `Σcaps < slots`. Predicates live on
+  `CompiledBlueprint`; `PaperGenerator` skips the doomed 50k-iteration backtrack when structural.
+
+**AI top-up (still async, teacher-triggered, algorithm-controlled):**
+- `MissingSlot` carries ordered `unitIds[]` (scarcest first; `unit_id` kept for back-compat). When
+  `units > slots`, the shortfall pairs the `2×(units−slots)` scarcest allowed units so each
+  requested question pulls coverage double duty.
+- `ExpandQuestionBank` stores survivors with primary = first target unit and **both** units tagged
+  (`syncUnitLinks`); `GroundingBuilder` accepts 0–2 units, adds a "must span BOTH units" directive
+  and tag-aware exemplars. Python `/generate-questions` gains `units: list[str] (≤ 2)` feeding the
+  prompt ("must genuinely integrate material from BOTH units… answerable using only one is
+  invalid"); the response schema is unchanged — Laravel remains authoritative for units exactly as
+  for type/marks.
+
+**Displayable product:** blueprint editor step 2 becomes "Unit Coverage & Maximums" — caps are
+optional, uncapped units allowed, continue only blocked when every unit is capped and the caps
+can't fill the paper; a 3-units/2-slots blueprint that used to dead-end at "AI can't fix this" now
+offers *Expand bank with AI*, and regenerating yields a paper where one question prints two units.
+
+No schema change (caps live in `blueprints.definition` JSON; the pivot already exists) — no ER
+update. Verified by `PaperGeneratorTest` (+7), `BankExpansionTest` (reworked structural cases +
+pair-request + both-units-tagged tests), `test_generate.py` (+3). 161 Laravel / 147 pytest green.
 
 ---
 

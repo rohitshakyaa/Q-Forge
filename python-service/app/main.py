@@ -82,6 +82,7 @@ def generate_questions(
             type=request.type,
             marks=request.marks,
             count=request.count,
+            units=request.units,
         )
     except Exception as exc:  # noqa: BLE001 - surface the reason, never 500 the caller
         logger.exception("generation failed")

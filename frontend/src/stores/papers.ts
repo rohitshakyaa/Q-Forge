@@ -41,7 +41,10 @@ export interface MissingSlot {
   type: string;
   marks: number;
   unit: string | null;
+  // First target unit (back-compat); unit_ids carries the full target set —
+  // two ids mean the AI top-up is asked for a question spanning both units.
   unit_id: number | null;
+  unit_ids: number[];
   need: number;
   description: string;
 }

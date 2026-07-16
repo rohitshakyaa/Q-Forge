@@ -12,20 +12,23 @@ use App\Models\Unit;
  * primary key — no embeddings, no vector store, no fine-tuning.
  *
  * Grounding is mandatory: an ungrounded model invents plausible-but-off-syllabus
- * questions. The block is `subjects.syllabus` (course overview) + the slot unit's
- * `units.content` (unit body) + up to three approved exemplars of the same
- * subject/unit/type, for style and difficulty. It degrades gracefully — a unit
- * predating the M4.1 content backfill falls back to the syllabus alone — and
- * records what it had to drop in `notes` so the job can log it.
+ * questions. The block is `subjects.syllabus` (course overview) + each target
+ * unit's `units.content` (unit body) + up to three approved exemplars of the same
+ * subject/units/type, for style and difficulty. A slot may target TWO units (the
+ * generated question must span both); each gets its own block plus a bridging
+ * directive. It degrades gracefully — a unit predating the M4.1 content backfill
+ * falls back to the syllabus alone — and records what it had to drop in `notes`
+ * so the job can log it.
  */
 class GroundingBuilder
 {
     private const MAX_EXEMPLARS = 3;
 
     /**
+     * @param  Unit[]  $units  ordered target units (0–2); empty = whole course
      * @return array{text: string, notes: string[]}
      */
-    public function for(Subject $subject, ?Unit $unit, string $type, int $marks): array
+    public function for(Subject $subject, array $units, string $type, int $marks): array
     {
         $notes = [];
         $parts = [];
@@ -37,7 +40,7 @@ class GroundingBuilder
             $notes[] = 'subject syllabus is empty';
         }
 
-        if ($unit !== null) {
+        foreach ($units as $unit) {
             $content = trim((string) $unit->content);
             if ($content !== '') {
                 $parts[] = "# Unit: {$unit->name}\n{$content}";
@@ -49,7 +52,11 @@ class GroundingBuilder
             }
         }
 
-        $exemplars = $this->exemplars($subject, $unit, $type);
+        if (count($units) > 1) {
+            $parts[] = '# Target: every question must span BOTH units above, integrating material from each.';
+        }
+
+        $exemplars = $this->exemplars($subject, $units, $type);
         if ($exemplars->isNotEmpty()) {
             $lines = $exemplars->values()->map(
                 fn (Question $q, int $i) => ($i + 1).'. '.trim($q->text)
@@ -61,7 +68,9 @@ class GroundingBuilder
 
         if (empty($parts)) {
             // Last resort: never send nothing. Give the model the bare target.
-            $unitLabel = $unit?->name ?? 'the course';
+            $unitLabel = $units !== []
+                ? implode(' and ', array_map(fn (Unit $u) => $u->name, $units))
+                : 'the course';
             $parts[] = "Write {$marks}-mark {$type} questions for {$unitLabel} in {$subject->name}.";
             $notes[] = 'no syllabus, unit content, or exemplars — sent bare slot spec';
         }
@@ -70,19 +79,27 @@ class GroundingBuilder
     }
 
     /**
-     * Up to three approved questions matching the slot's subject (+ unit when the
-     * slot names one) and type. Scarcity is expected — the unit is thin, which is
-     * why we are expanding — so 0–3 is normal; we never fabricate to pad.
+     * Up to three approved questions matching the slot's subject (+ any target
+     * unit when the slot names some — tag-aware, so a multi-unit question is an
+     * exemplar for every unit it spans) and type. Scarcity is expected — the
+     * unit is thin, which is why we are expanding — so 0–3 is normal; we never
+     * fabricate to pad.
      *
+     * @param  Unit[]  $units
      * @return \Illuminate\Support\Collection<int, Question>
      */
-    private function exemplars(Subject $subject, ?Unit $unit, string $type)
+    private function exemplars(Subject $subject, array $units, string $type)
     {
+        $unitIds = array_map(fn (Unit $u) => (int) $u->id, $units);
+
         return Question::query()
             ->where('subject_id', $subject->id)
             ->where('status', 'approved')
             ->where('type', $type)
-            ->when($unit !== null, fn ($q) => $q->where('unit_id', $unit->id))
+            ->when($unitIds !== [], fn ($q) => $q->whereHas(
+                'units',
+                fn ($sub) => $sub->whereIn('units.id', $unitIds),
+            ))
             ->orderBy('id')
             ->limit(self::MAX_EXEMPLARS)
             ->get();

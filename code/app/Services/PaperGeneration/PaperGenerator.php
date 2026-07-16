@@ -51,9 +51,14 @@ class PaperGenerator
             return new GenerationResult(true, $compiled, $greedy, $constraints, []);
         }
 
-        // Pass 2 — backtracking repair for a fully-valid assignment.
+        // Pass 2 — backtracking repair for a fully-valid assignment. Skipped
+        // when the blueprint is structurally infeasible (coverage outstrips the
+        // paper's unit capacity, or caps can't fill the slots): no assignment
+        // can exist, so the DFS would only burn its iteration budget.
         $candidatesBySlot = $this->poolsBySlot($compiled, $lastN);
-        $resolved = $this->resolver->resolve($compiled, $candidatesBySlot);
+        $resolved = $compiled->structurallyInfeasible()
+            ? null
+            : $this->resolver->resolve($compiled, $candidatesBySlot);
 
         if ($resolved !== null) {
             $constraints = $this->validator->validate($compiled, $resolved);
@@ -114,6 +119,8 @@ class PaperGenerator
     /**
      * Fill each slot in order with the greedy pick, excluding questions already
      * chosen in this paper and (via $lastN) those used in the last N papers.
+     * Threads the running covered-unit set into the selector (coverage-first
+     * rank) and rejects candidates that would exceed a per-unit cap.
      *
      * @param  (callable(Builder): void)|null  $lastN
      * @return array<int, Question>
@@ -122,18 +129,54 @@ class PaperGenerator
     {
         $selections = [];
         $usedIds = [];
+        $covered = [];
+        $unitUse = [];
 
         foreach ($compiled->slots as $slot) {
             $pool = $this->filter->for($slot, $compiled, $usedIds, $lastN);
-            $pick = $this->selector->pick($pool);
+
+            if ($compiled->unitCaps !== []) {
+                $pool = $pool->reject(
+                    fn (Question $q) => $this->bustsCap($q, $compiled->unitCaps, $unitUse)
+                )->values();
+            }
+
+            $uncovered = array_values(array_diff($compiled->allowedUnitIds, $covered));
+            $pick = $this->selector->pick($pool, $uncovered);
 
             if ($pick !== null) {
                 $selections[$slot->index] = $pick;
                 $usedIds[] = $pick->id;
+
+                foreach ($pick->taggedUnitIds() as $unitId) {
+                    $covered[] = $unitId;
+                    if (isset($compiled->unitCaps[$unitId])) {
+                        $unitUse[$unitId] = ($unitUse[$unitId] ?? 0) + 1;
+                    }
+                }
             }
         }
 
         return $selections;
+    }
+
+    /**
+     * True when selecting $question would push any of its tagged capped units
+     * past its maximum. A multi-unit question counts 1 toward EVERY tagged
+     * capped unit. (The BacktrackingResolver prunes with the same rule.)
+     *
+     * @param  array<int, int>  $caps  unitId => max
+     * @param  array<int, int>  $unitUse  unitId => questions already counted
+     */
+    private function bustsCap(Question $question, array $caps, array $unitUse): bool
+    {
+        foreach ($question->taggedUnitIds() as $unitId) {
+            if (isset($caps[$unitId]) && ($unitUse[$unitId] ?? 0) + 1 > $caps[$unitId]) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -193,21 +236,26 @@ class PaperGenerator
             $deficit = $group['required'] - $pool->count();
 
             if ($deficit > 0) {
-                // Enrich the shortfall with a concrete unit id for the M5 top-up. On a
+                // Enrich the shortfall with concrete unit ids for the M5 top-up. On a
                 // unit-restricted blueprint an AI question must land on an allowed unit
                 // or CandidateFilter's allowed-units check hides it; target the allowed
-                // unit with the fewest matching approved questions so we fill the real
-                // gap (a unit with zero approved questions is thus preferred). An
-                // unrestricted blueprint keeps unitId null (no unit filter applies).
-                $targetUnitId = $this->leastPopulatedAllowedUnit($compiled, $pool);
+                // units with the fewest matching approved questions so we fill the real
+                // gap (a unit with zero approved questions is thus preferred). When the
+                // coverage rule demands more units than the paper has slots, each
+                // top-up question must pull double duty — target the TWO scarcest
+                // units so it spans both. An unrestricted blueprint keeps unitIds
+                // empty (no unit filter applies).
+                $byScarcity = $this->unitsByScarcity($compiled, $pool);
+                $span = count($compiled->allowedUnitIds) > count($compiled->slots) ? 2 : 1;
+                $targetUnitIds = array_slice($byScarcity, 0, $span);
 
                 $missing[] = new MissingSlot(
                     sectionLabel: $slot->sectionLabel,
                     type: $slot->type,
                     marks: $slot->marks,
-                    unit: $targetUnitId !== null ? ($compiled->unitNames[$targetUnitId] ?? null) : null,
+                    unit: $this->unitLabel($compiled, $targetUnitIds),
                     need: $deficit,
-                    unitId: $targetUnitId,
+                    unitIds: $targetUnitIds,
                 );
             }
         }
@@ -219,17 +267,41 @@ class PaperGenerator
         // Supply is adequate but coverage is impossible: name the uncovered units.
         // Union semantics — a multi-unit question covers every tagged unit.
         $covered = collect($partial)->flatMap(fn (Question $q) => $q->taggedUnitIds())->unique()->all();
-        $uncovered = array_diff($compiled->allowedUnitIds, $covered);
+        $uncovered = array_values(array_diff($compiled->allowedUnitIds, $covered));
         $firstSlot = $compiled->slots[0] ?? null;
 
-        foreach ($uncovered as $unitId) {
+        $allPool = collect($candidatesBySlot)->flatMap(fn (Collection $pool) => $pool)->unique('id');
+        $byScarcity = $this->unitsByScarcity($compiled, $allPool);
+
+        if (count($compiled->allowedUnitIds) <= count($compiled->slots)) {
+            // Enough slots for one unit apiece: single-unit top-ups suffice.
+            $chunks = array_map(
+                fn (int $unitId) => [$unitId],
+                array_values(array_intersect($byScarcity, $uncovered)),
+            );
+        } else {
+            // More units than slots: only unit-spanning questions can close the
+            // gap — a valid paper needs (units − slots) questions that each cover
+            // two units. Pair up the scarcest units for those, and top up any
+            // uncovered unit left outside the pairs with a single. (units > 2×slots
+            // is structurally infeasible and never dispatched.)
+            $pairCount = count($compiled->allowedUnitIds) - count($compiled->slots);
+            $pairUnits = array_slice($byScarcity, 0, 2 * $pairCount);
+            $chunks = array_chunk($pairUnits, 2);
+
+            foreach (array_diff($uncovered, $pairUnits) as $unitId) {
+                $chunks[] = [$unitId];
+            }
+        }
+
+        foreach ($chunks as $unitIds) {
             $missing[] = new MissingSlot(
                 sectionLabel: $firstSlot?->sectionLabel ?? 'Section',
                 type: $firstSlot?->type ?? 'short',
                 marks: $firstSlot?->marks ?? 0,
-                unit: $compiled->unitNames[$unitId] ?? "Unit {$unitId}",
+                unit: $this->unitLabel($compiled, $unitIds),
                 need: 1,
-                unitId: $unitId,
+                unitIds: $unitIds,
             );
         }
 
@@ -237,17 +309,18 @@ class PaperGenerator
     }
 
     /**
-     * The allowed unit with the fewest matching approved questions in the candidate
-     * pool, or null when the blueprint imposes no unit restriction. Units with zero
-     * approved questions (absent from the pool) count as 0 and so win. Deterministic
-     * tie-break by ascending unit id.
+     * Allowed units ordered by how few matching approved questions the candidate
+     * pool holds (scarcest first), or [] when the blueprint imposes no unit
+     * restriction. Units with zero approved questions (absent from the pool)
+     * count as 0 and so come first. Deterministic tie-break by ascending unit id.
      *
      * @param  Collection<int, Question>  $pool
+     * @return int[]
      */
-    private function leastPopulatedAllowedUnit(CompiledBlueprint $compiled, Collection $pool): ?int
+    private function unitsByScarcity(CompiledBlueprint $compiled, Collection $pool): array
     {
         if (empty($compiled->allowedUnitIds)) {
-            return null;
+            return [];
         }
 
         // Supply per unit counts every tagged unit (a Units 2+3 question is
@@ -261,6 +334,22 @@ class PaperGenerator
 
         return collect($allowed)
             ->sortBy(fn (int $unitId) => $countsByUnit->get($unitId, 0))
-            ->first();
+            ->values()
+            ->all();
+    }
+
+    /** Display label for a target unit set, e.g. "Trees" or "Trees + Graphs". */
+    private function unitLabel(CompiledBlueprint $compiled, array $unitIds): ?string
+    {
+        if ($unitIds === []) {
+            return null;
+        }
+
+        $names = array_map(
+            fn (int $unitId) => $compiled->unitNames[$unitId] ?? "Unit {$unitId}",
+            $unitIds,
+        );
+
+        return implode(' + ', $names);
     }
 }

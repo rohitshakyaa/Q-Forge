@@ -11,10 +11,21 @@ from abc import ABC, abstractmethod
 
 class LLMProvider(ABC):
     @abstractmethod
-    def generate(self, *, grounding: str, type: str, marks: int, count: int) -> list[dict]:
+    def generate(
+        self,
+        *,
+        grounding: str,
+        type: str,
+        marks: int,
+        count: int,
+        units: list[str] | None = None,
+    ) -> list[dict]:
         """Return up to `count` raw question dicts for the given type + marks.
 
-        Shape per item: ``{"text", "type", "marks", ["options", "answer"]}``. Returning
-        fewer than `count`, or an occasional malformed item, is acceptable.
+        `units` (0–2 names) targets the prompt: two names ask for questions
+        spanning both units. Shape per item: ``{"text", "type", "marks",
+        ["options", "answer"]}`` — units are never echoed (Laravel stamps them).
+        Returning fewer than `count`, or an occasional malformed item, is
+        acceptable.
         """
         raise NotImplementedError

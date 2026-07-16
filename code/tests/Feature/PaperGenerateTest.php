@@ -97,7 +97,10 @@ class PaperGenerateTest extends TestCase
             ->assertOk()
             ->assertJsonPath('satisfiable', false)
             ->assertJsonPath('missing_slots.0.type', 'long')
-            ->assertJsonPath('missing_slots.0.need', 3);
+            ->assertJsonPath('missing_slots.0.need', 3)
+            // Both the back-compat single id and the new target set are exposed.
+            ->assertJsonPath('missing_slots.0.unit_id', $unit->id)
+            ->assertJsonPath('missing_slots.0.unit_ids', [$unit->id]);
 
         $this->assertSame(0, Paper::count());
         // No paper persisted means the blueprint was not "used".

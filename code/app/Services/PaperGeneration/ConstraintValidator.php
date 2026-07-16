@@ -9,7 +9,8 @@ use App\Services\PaperGeneration\Support\ConstraintResult;
 /**
  * Scores a set of selections against the blueprint and returns a structured
  * pass/fail line per constraint (feeds the frontend ConstraintResult[]):
- * per-section counts, total marks, unit coverage, and no in-paper repetition.
+ * per-section counts, total marks, unit coverage, per-unit maximums, and no
+ * in-paper repetition.
  */
 class ConstraintValidator
 {
@@ -71,6 +72,30 @@ class ConstraintValidator
                 expected: "{$expectedCount} units",
                 got: $coveredIds->count().' units',
                 pass: $coveredIds->count() === $expectedCount,
+            );
+        }
+
+        // Per-unit maximums (only when the blueprint caps units). A multi-unit
+        // question counts 1 toward EVERY tagged capped unit.
+        if (! empty($blueprint->unitCaps)) {
+            $useByUnit = collect($selections)
+                ->flatMap(fn (Question $q) => $q->taggedUnitIds())
+                ->countBy();
+
+            $violations = [];
+            foreach ($blueprint->unitCaps as $unitId => $cap) {
+                $used = $useByUnit->get($unitId, 0);
+                if ($used > $cap) {
+                    $name = $blueprint->unitNames[$unitId] ?? "Unit {$unitId}";
+                    $violations[] = "{$name} {$used}/{$cap}";
+                }
+            }
+
+            $results[] = new ConstraintResult(
+                label: 'Unit maximums',
+                expected: 'every capped unit ≤ its max',
+                got: $violations === [] ? 'all within max' : implode(', ', $violations),
+                pass: $violations === [],
             );
         }
 

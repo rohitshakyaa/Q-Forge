@@ -25,8 +25,18 @@ class OllamaProvider(LLMProvider):
         self.timeout = timeout
         self.debug = settings.llm_debug
 
-    def generate(self, *, grounding: str, type: str, marks: int, count: int) -> list[dict]:
-        prompt = build_prompt(grounding=grounding, type=type, marks=marks, count=count)
+    def generate(
+        self,
+        *,
+        grounding: str,
+        type: str,
+        marks: int,
+        count: int,
+        units: list[str] | None = None,
+    ) -> list[dict]:
+        prompt = build_prompt(
+            grounding=grounding, type=type, marks=marks, count=count, units=units
+        )
 
         if self.debug:
             logger.info("LLM prompt (model=%s, type=%s, marks=%s, count=%s):\n%s",

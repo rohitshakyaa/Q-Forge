@@ -69,3 +69,32 @@ class TestGenerateQuestions:
             json={"grounding": "x", "type": "short", "marks": 5, "count": 0},
         )
         assert response.status_code == 422
+
+    def test_units_are_optional_and_default_to_none(self, stub_client):
+        # Requests without `units` (all pre-multi-unit callers) keep working, and
+        # the stub emits no unit scope marker.
+        body = post_generate(stub_client, count=1)
+
+        assert body["status"] == "success"
+        assert "[" not in body["data"][0]["text"].replace("[stub]", "")
+
+    def test_two_units_reach_the_provider_prompt(self, stub_client):
+        # The stub echoes the unit scope into the text, proving the request's
+        # units survive the whole path (endpoint -> provider). Units are never
+        # echoed as a response FIELD — Laravel stamps them on save.
+        body = post_generate(stub_client, count=2, units=["Trees", "Graphs"])
+
+        assert body["status"] == "success"
+        for q in body["data"]:
+            assert "Trees + Graphs" in q["text"]
+            assert "units" not in q
+
+    def test_rejects_more_than_two_units(self, stub_client):
+        response = stub_client.post(
+            "/generate-questions",
+            json={
+                "grounding": "x", "type": "short", "marks": 5, "count": 1,
+                "units": ["A", "B", "C"],
+            },
+        )
+        assert response.status_code == 422
