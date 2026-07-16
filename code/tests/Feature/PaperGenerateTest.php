@@ -73,6 +73,8 @@ class PaperGenerateTest extends TestCase
         $this->assertSame(3, Paper::first()->paperQuestions()->count());
         // M3: the three chosen questions have their used_count bumped on persist.
         $this->assertSame(3, Question::where('used_count', '>', 0)->count());
+        // Persisting a paper stamps the blueprint (the cards' "Last used" label).
+        $this->assertNotNull($blueprint->fresh()->last_used_at);
     }
 
     public function test_returns_missing_slots_and_persists_nothing_for_infeasible_blueprint(): void
@@ -98,6 +100,8 @@ class PaperGenerateTest extends TestCase
             ->assertJsonPath('missing_slots.0.need', 3);
 
         $this->assertSame(0, Paper::count());
+        // No paper persisted means the blueprint was not "used".
+        $this->assertNull($blueprint->fresh()->last_used_at);
     }
 
     public function test_admin_cannot_generate_papers(): void

@@ -66,6 +66,9 @@ const startGeneration = async () => {
   phase.value = 'generating';
   await papersStore.generate(selectedBP.value.id);
   phase.value = 'done';
+  // A persisted paper stamps the blueprint's last_used_at; refresh the cards
+  // so "Generate Another" doesn't show a stale "Last used: Never".
+  void blueprintsStore.fetch();
 };
 
 const openPaper = () => {
@@ -80,6 +83,7 @@ const expandWithAi = async () => {
   phase.value = 'generating';
   await papersStore.expandBank(selectedBP.value.id);
   phase.value = 'done';
+  void blueprintsStore.fetch();
 };
 
 const passedCount = computed(() => papersStore.constraints.filter((c) => c.pass === true).length);

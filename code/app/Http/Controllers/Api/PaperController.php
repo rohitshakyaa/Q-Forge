@@ -106,6 +106,9 @@ class PaperController extends Controller
                 Question::whereIn('id', $pickedIds)->increment('used_count');
             }
 
+            // "Last used" on the blueprint cards; only a persisted paper counts as use.
+            $blueprint->update(['last_used_at' => now()]);
+
             return $paper;
         });
     }
