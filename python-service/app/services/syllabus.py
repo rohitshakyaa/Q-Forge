@@ -84,7 +84,10 @@ _ROMAN_HEADING = re.compile(
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
 
 # "1.1 ...", "1.13.1 ...", "1.32.4.1 ..." — a sub-topic at any nesting depth.
-_SUBTOPIC = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){1,3})\s+(.*)$")
+# pdfplumber drops the space after the number in some documents ("1.1Compiler
+# Structure", the TU CSC376 syllabus), so a glued capitalised word also opens
+# the body — but only a capital: "3.5million" stays ordinary prose.
+_SUBTOPIC = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){1,3})(?:\s+|(?=[A-Z(]))(.*)$")
 _SUBTOPIC_LABEL = re.compile(r"^([^:]{3,60}):\s*(.*)$", re.DOTALL)
 # A lettered ("a. Word Length") or dashed ("- Memos", "-Basics") list item — rendered as a
 # plain bullet. The BIM template prints these with and without a space after the marker.

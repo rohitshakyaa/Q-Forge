@@ -144,6 +144,25 @@ class TestUnnamedUnits:
     def test_a_wrapped_subtopic_stays_on_one_bullet(self, units):
         assert "different sub-phases within analysis phase" in units[0].content.split("\n")[0]
 
+    def test_a_glued_subtopic_number_still_names_the_unit(self):
+        # The real CSC376 PDF loses the space after the number ("1.1Compiler
+        # Structure"), and the name derivation must survive that.
+        glued = COMPILER.replace("1.1 Compiler", "1.1Compiler").replace(
+            "3.1 Symbol", "3.1Symbol"
+        )
+        units = parse_courses([page(glued)])[0].units
+        assert [u.name for u in units] == ["Compiler Structure", "Symbol Table Design"]
+
+    def test_a_glued_decimal_in_prose_is_not_a_subtopic(self):
+        # "3.5million" must stay paragraph text, not become a bullet "- million".
+        course = parse_courses([page(COMPILER.replace(
+            "1.2 Interpreter: interpreter versus compiler",
+            "1.2 Interpreter: handles 3.5million lines\n3.5million lines is typical",
+        ))])[0]
+        assert "- **Interpreter:** handles 3.5million lines 3.5million lines is typical" in (
+            course.units[0].content
+        )
+
 
 class TestBitTemplate:
     """The TU BIT layout: 'Course Number:' label, a spaced code, and a table header

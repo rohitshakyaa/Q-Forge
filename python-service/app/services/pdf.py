@@ -58,6 +58,22 @@ def _render_table_markdown(rows: list[list[str | None]]) -> str:
     return "\n".join(lines)
 
 
+def _is_data_table(rows: list[list[str | None]]) -> bool:
+    """True when the detected grid actually distributes content across columns.
+
+    pdfplumber's line strategy also "finds" a table in an ordinary Word page
+    frame — the TU CSC376 syllabus yields a 26-row, 2-column grid whose second
+    column is empty in all but 3 rows — and wrapping the whole page in pipes
+    hides every heading from the downstream parsers. A real data table fills
+    two or more cells in most of its rows; a layout artifact fills one.
+    """
+    multi_cell_rows = sum(
+        1 for row in rows if sum(1 for cell in row if cell and cell.strip()) >= 2
+    )
+
+    return multi_cell_rows * 2 >= len(rows)
+
+
 def _extract_text_with_tables(page) -> str:
     """Page text with ruled tables rendered as markdown, in reading order.
 
@@ -70,22 +86,24 @@ def _extract_text_with_tables(page) -> str:
     Tesseract has no notion of cells — those still come out as flattened rows.
     """
     tables = [
-        table
+        (table, rows)
         for table in page.find_tables()
-        if len(table.rows) >= 2 and len(table.rows[0].cells) >= 2
+        if len(table.rows) >= 2
+        and len(table.rows[0].cells) >= 2
+        and _is_data_table(rows := table.extract())
     ]
     if not tables:
         return (page.extract_text() or "").strip()
 
     prose = page
-    for table in tables:
+    for table, _ in tables:
         prose = prose.outside_bbox(table.bbox)
 
     blocks: list[tuple[float, str]] = [
         (line["top"], line["text"]) for line in prose.extract_text_lines()
     ]
-    for table in tables:
-        blocks.append((table.bbox[1], _render_table_markdown(table.extract())))
+    for table, rows in tables:
+        blocks.append((table.bbox[1], _render_table_markdown(rows)))
 
     blocks.sort(key=lambda block: block[0])
 

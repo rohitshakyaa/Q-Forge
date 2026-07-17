@@ -126,3 +126,28 @@ def junk_layer_pdf(shared_root: Path, digital_pdf: Path) -> Path:
         pdf.cell(0, 14, line, new_x="LMARGIN", new_y="NEXT")
     pdf.output(str(path))
     return path
+
+
+@pytest.fixture(scope="session")
+def framed_pdf(shared_root: Path) -> Path:
+    """A page whose prose sits inside a Word-style layout frame.
+
+    The shape of the TU CSC376 syllabus: pdfplumber's line strategy "finds" a
+    two-column table over the whole page, but the second column is empty — a
+    layout artifact, not a data table. The text must come out as plain lines,
+    never wrapped into markdown pipes.
+    """
+    path = shared_root / "framed.pdf"
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    for line in [
+        "1. Define a hash collision. [5]",
+        "2. Explain the difference between BFS and DFS. [10]",
+        "3. List two uses of a B-tree. [5]",
+    ]:
+        pdf.cell(150, 10, line, border=1)
+        pdf.cell(30, 10, "", border=1)
+        pdf.ln()
+    pdf.output(str(path))
+    return path

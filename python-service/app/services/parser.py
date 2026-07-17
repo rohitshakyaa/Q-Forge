@@ -19,11 +19,27 @@ _QUESTION_START = re.compile(r"^(?:Q\s*\.?\s*)?(\d{1,2})\s*[.)]\s*")
 # "l," or "I.", and "11." as "1 1.". Accept those shapes there — but only there,
 # since a digital page never prints them. A comma terminator must not be
 # followed by a digit, or the "40,000" of a cash-flow table becomes question 40.
-_QUESTION_START_OCR = re.compile(r"^(?:Q\s*\.?\s*)?([\dIl|]\s?\d?)\s*(?:[.)]|,(?!\d))\s*")
+# Pen ticks over the margin also leave a stray glyph *before* an intact number
+# (".4," / "- 12." in the SE 2076 scan), so up to two junk characters may
+# precede it — the number and terminator themselves must still both be present.
+_QUESTION_START_OCR = re.compile(
+    r"^[-._'‘’~*]{0,2}\s?(?:Q\s*\.?\s*)?([\dIl|]\s?\d?)\s*(?:[.)]|,(?!\d))\s*"
+)
 
-# "Unit 3", "Unit-III", "Group B", "Section A" printed on a line of their own.
+# Some papers print their first question with no terminator at all ("1 Answer
+# the following questions in short."). Accepted only on an OCR page and only
+# while no question is open yet: before question 1 everything is filtered
+# preamble, so a lone "1" (or its misreads) followed by a capitalised word can
+# start nothing but the first question.
+_FIRST_QUESTION_BARE_OCR = re.compile(r"^(?:Q\s*\.?\s*)?([1Il|])\s+(?=[A-Z\"(])")
+
+# "Unit 3", "Unit-III", "Group B", "Section A" printed on a line of their own —
+# or fused with the section's own marks directive ("Section B [6x5=30]", the
+# e-commerce 2075/2076 shape). Nothing else may trail, or a question that merely
+# begins with "Section A ..." would be eaten as a heading.
 _UNIT_HINT = re.compile(
-    r"^\s*((?:unit|group|section)\s*[-–—:]?\s*(?:\d{1,2}|[ivxIVX]{1,5}|[A-H]))\s*[:.;]?\s*$",
+    r"^\s*((?:unit|group|section)\s*[-–—:]?\s*(?:\d{1,2}|[ivxIVX]{1,5}|[A-H]))\s*[:.;]?"
+    r"\s*(?:[\[(]\s*\d{1,2}\s*[x×*]\s*\d{1,3}\s*(?:[=:]\s*\d{1,3}\s*)?[\])])?\s*$",
     re.IGNORECASE,
 )
 
@@ -60,6 +76,14 @@ _OCR_DIGITS_UPPER = str.maketrans({"I": "1", "i": "1", "l": "1", "|": "1"})
 # and the value cannot be trusted.
 _DIRECTIVE = re.compile(r"^\s*(?:attempt|answer)\s+(?:all|any)\b", re.IGNORECASE)
 _DIRECTIVE_MARKS = re.compile(r"[\[(]\s*(\d{1,2})\s*[x×*]\s*(\d{1,3})\s*(?:[=:]\s*(\d{1,3})\s*)?[\])]")
+
+# The directive's expression alone on the next line — pdfplumber and Tesseract
+# both split "Attempt any Ten questions.   (10x6=60)" across two lines when the
+# gap between them is wide enough. Anchored on both ends: only a line that is
+# nothing but the expression may complete the directive above it.
+_DIRECTIVE_MARKS_ALONE = re.compile(
+    r"^\s*[\[(]\s*\d{1,2}\s*[x×*]\s*\d{1,3}\s*(?:[=:]\s*\d{1,3}\s*)?[\])]\s*$"
+)
 
 # Rubric, letterhead and footer lines that carry no question content. These repeat
 # on every page of a multi-paper document, so they must be dropped rather than
@@ -119,15 +143,12 @@ def unit_hint_from_line(line: str) -> str | None:
     return re.sub(r"\s+", " ", match.group(1)).strip()
 
 
-def section_default_from_line(line: str) -> int | None:
-    """Per-question marks from a section directive, or None.
+def _directive_marks(line: str) -> int | None:
+    """Per-question value of a "count x per (= total)" expression in `line`.
 
-    "Attempt any TEN questions. [10 x 5 = 50]" -> 5. Only the "count x per"
-    shape counts; a directive with no expression sets nothing.
+    The stated total, when printed, must agree with count x per; a mismatch
+    means OCR mangled a digit and the value cannot be trusted.
     """
-    if not _DIRECTIVE.match(line):
-        return None
-
     match = _DIRECTIVE_MARKS.search(line)
     if not match:
         return None
@@ -137,6 +158,18 @@ def section_default_from_line(line: str) -> int | None:
         return None
 
     return per
+
+
+def section_default_from_line(line: str) -> int | None:
+    """Per-question marks from a section directive, or None.
+
+    "Attempt any TEN questions. [10 x 5 = 50]" -> 5. Only the "count x per"
+    shape counts; a directive with no expression sets nothing.
+    """
+    if not _DIRECTIVE.match(line):
+        return None
+
+    return _directive_marks(line)
 
 
 def _evaluate_marks(inner: str) -> float | None:
@@ -308,6 +341,7 @@ def parse_pages(pages: list[PageText]) -> list[Candidate]:
     buffer: list[str] = []
     unit_hint: str | None = None
     section_default: int | None = None
+    pending_directive = False
     start_page = 1
     start_ocr = False
 
@@ -330,10 +364,12 @@ def parse_pages(pages: list[PageText]) -> list[Candidate]:
             if hint:
                 # A new unit heading ends the question that preceded it — and
                 # voids the old directive: if this section's own directive is
-                # missed, better no marks than the previous section's.
+                # missed, better no marks than the previous section's. A fused
+                # heading ("Section B [6x5=30]") carries the directive itself.
                 flush()
                 unit_hint = hint
-                section_default = None
+                section_default = _directive_marks(stripped)
+                pending_directive = False
                 continue
 
             default = section_default_from_line(stripped)
@@ -341,13 +377,33 @@ def parse_pages(pages: list[PageText]) -> list[Candidate]:
                 # The directive separates sections as surely as a heading does.
                 flush()
                 section_default = default
+                pending_directive = False
                 continue
+
+            if _DIRECTIVE.match(stripped):
+                # A directive with no expression on its own line — the layout
+                # may have pushed "(10x6=60)" to the next one. Note that, and
+                # let the noise rule drop the directive line as before.
+                pending_directive = True
+            elif pending_directive:
+                pending_directive = False
+                if _DIRECTIVE_MARKS_ALONE.match(stripped):
+                    completed = _directive_marks(stripped)
+                    if completed is not None:
+                        flush()
+                        section_default = completed
+                        continue
 
             if is_noise(stripped):
                 continue
 
             start_pattern = _QUESTION_START_OCR if page.ocr else _QUESTION_START
             match = start_pattern.match(stripped)
+            if match is None and page.ocr and number is None and not candidates:
+                # Before the first question everything is preamble, so a bare
+                # "1 Answer the following…" (no terminator printed at all) can
+                # start nothing but question 1.
+                match = _FIRST_QUESTION_BARE_OCR.match(stripped)
             if match:
                 flush()
                 number = re.sub(r"\s+", "", match.group(1)).translate(_OCR_DIGITS_UPPER)

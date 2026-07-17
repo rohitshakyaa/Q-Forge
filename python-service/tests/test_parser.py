@@ -188,6 +188,14 @@ class TestNoiseAndHints:
     def test_inline_unit_mention_is_not_a_heading(self):
         assert unit_hint_from_line("1. Unit 3 covers graphs; explain why.") is None
 
+    def test_a_fused_directive_still_yields_the_heading(self):
+        # The e-commerce 2075/2076 papers glue the directive to the heading.
+        assert unit_hint_from_line("Section B [6x5=30]") == "Section B"
+        assert unit_hint_from_line("Section A (10x3=30)") == "Section A"
+
+    def test_a_question_starting_with_a_section_word_is_not_a_heading(self):
+        assert unit_hint_from_line("Section A of the act defines liability.") is None
+
 
 class TestParsePages:
     @pytest.fixture
@@ -323,6 +331,49 @@ class TestOcrNumbering:
         result = parse_pages([page("l, Introduce organizational goal and describe it.", ocr=False)])
         assert result == []
 
+    @pytest.mark.parametrize(
+        ("line", "number"),
+        [
+            # Pen ticks in the margin leave a stray glyph before an intact
+            # number (the SE 2076 scan): the number and terminator must both
+            # still be present, only the junk in front is forgiven.
+            (".4, Briefly explain functional and non-functional requirements.", "4"),
+            ("- 12. Write short notes on reliability validation.", "12"),
+        ],
+    )
+    def test_a_stray_glyph_before_the_number_is_ignored_on_ocr_pages(self, line, number):
+        result = parse_pages([page(line, ocr=True)])
+        assert len(result) == 1
+        assert result[0].number == number
+
+    def test_the_first_question_may_lack_a_terminator_on_ocr_pages(self):
+        # The NCC 2076 paper prints "1 Answer the following..." — no dot at all.
+        text = "\n".join(
+            [
+                "Attempt all questions.",
+                "1 Answer the following questions in short.",
+                "a) ASP requirements",
+                "2. a) Differentiate between ASP and IIS. [5]",
+            ]
+        )
+        first, second = parse_pages([page(text, ocr=True)])
+        assert first.number == "1"
+        assert first.text.startswith("Answer the following")
+        assert second.number == "2"
+
+    def test_a_bare_number_mid_paper_does_not_split_a_question(self):
+        # Only the first question gets the no-terminator allowance. Mid-paper a
+        # bare "8 What..." (its dot lost to a pen mark) stays with the open
+        # question rather than risking splits on prose like "5 GB of RAM".
+        text = "\n".join(
+            [
+                "7. What are the activities of architectural design process?",
+                "8 What is modular decomposition? Discuss its models.",
+            ]
+        )
+        result = parse_pages([page(text, ocr=True)])
+        assert len(result) == 1
+
     def test_a_cash_flow_row_does_not_start_a_question(self):
         # "40,000" must not become question 40: comma + digit is a thousands
         # separator, not a numbering terminator.
@@ -388,6 +439,51 @@ class TestSectionDefaultMarks:
         )
         first, second = parse_pages([page(text)])
         assert first.marks == 10
+        assert second.marks is None
+
+    def test_a_fused_heading_supplies_the_default_and_ends_the_question(self):
+        # "Section B [6x5=30]" must act as heading + directive. Before this was
+        # understood, the line fell into the open question above it, where its
+        # bracket was summed into that question's marks (10 became 40 on the
+        # e-commerce 2075 paper).
+        text = "\n".join(
+            [
+                "Section A",
+                "3. What is a structured document? Discuss its parts. [3+7]",
+                "Section B [6x5=30]",
+                "4. How e-cash works? List its properties.",
+            ]
+        )
+        third, fourth = parse_pages([page(text)])
+        assert third.marks == 10
+        assert "6x5" not in third.text
+        assert fourth.unit_hint == "Section B"
+        assert fourth.marks == 5
+
+    def test_directive_marks_on_the_following_line_still_set_the_default(self):
+        # The SE 2076 scan and the born-digital SE 2079 paper both push the
+        # expression onto its own line below the directive.
+        text = "\n".join(
+            [
+                "Attempt any Ten questions.",
+                "(10x6=60)",
+                "1. Explain system modeling with suitable example.",
+            ]
+        )
+        assert parse_pages([page(text)])[0].marks == 6
+
+    def test_a_standalone_expression_without_a_directive_sets_nothing(self):
+        # A "[2 x 2.5=5]" on its own line belongs to the question above it,
+        # not to the section — only a directive line arms the carry-over.
+        text = "\n".join(
+            [
+                "1. Write short notes on:",
+                "[2 x 2.5=5]",
+                "2. Define management briefly and precisely.",
+            ]
+        )
+        first, second = parse_pages([page(text)])
+        assert first.marks == 5
         assert second.marks is None
 
     def test_trailing_paren_marks_are_detected_and_stripped(self):

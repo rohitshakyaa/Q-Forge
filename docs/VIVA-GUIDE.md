@@ -618,7 +618,11 @@ locked in the form) so the import always lands in that subject; on success the a
 - **Table-column bleed.** When units sit in a table (description | methodology | hours), pdfplumber
   interleaves the columns, so a unit's `content` can pick up "Lecture/Lab" fragments. Mitigation:
   the description is **editable in the review screen**, and *nothing is stored until the admin
-  presses Import* — so a human always cleans it first.
+  presses Import* — so a human always cleans it first. *(A related limit was removed 2026-07-17:
+  a Word-style page frame used to be mistaken for a data table — the CSC376 syllabus parsed zero
+  units because every line got wrapped in markdown pipes; `pdf.py::_is_data_table` now rejects
+  grids that fill only one column. Glued sub-topic numbers, `1.1Compiler Structure`, are also
+  handled now.)*
 - **Combined syllabus + model-question PDFs, or a cover-page course list,** produce spurious 0-unit
   "courses". The review screen **hides any 0-unit course**, since it could never be imported anyway.
 
@@ -697,7 +701,15 @@ misread shapes are folded back (`I→1`, `1 1→11`) before the number is stored
 see the loose pattern — a born-digital PDF simply doesn't print `l,` — so this can't cause
 regressions where OCR isn't involved.
 
-Two more parser fixes came out of the same 29-paper test run:
+Two more OCR-page tolerances came from the 6th-semester run (27 papers, 2026-07-17): **a stray
+glyph before an intact number is forgiven** (pen ticks in the margin OCR as `.4,` / `- 12.` — the
+number and terminator must still both be present), and **the first question may lack a terminator
+entirely** (the NCC 2076 paper prints `1 Answer the following…` with no dot). The second allowance
+applies *only* while no question is open yet — before question 1 everything is filtered preamble,
+so a lone `1` can start nothing else; mid-paper, a bare `8 What…` stays with the open question
+rather than risking splits on prose like `5 GB of RAM` (*prefer missing over wrong*).
+
+Two more parser fixes came out of the earlier 29-paper test run:
 
 - **A number alone on its own line keeps its question.** pdfplumber renders many TU papers as `5.`
   on one line and the text below it; the splitter used to treat the following text as droppable
@@ -705,26 +717,33 @@ Two more parser fixes came out of the same 29-paper test run:
   MGT411 2079 paper. An open question now claims following lines even when its number stood alone.
 - **Unit headings tolerate OCR residue** — `Group A ;` still matches as a heading.
 
-### Measured result (the 29-PDF benchmark)
+### Measured result (the two PDF benchmarks)
 
 Tested against 29 real TU past papers (SPM, Data Mining, Principles of Management, Advanced Java,
 years 2069–2083 — a mix of born-digital PDFs and photocopied scans):
 
-| Metric | Before | After |
+| Metric | Before | After (2026-07-17) |
 |---|---|---|
 | Total candidates extracted | 241 | **368** |
-| Candidates missing marks | 44 | **17** |
+| Candidates missing marks | 44 | **14** |
 | Papers yielding their complete question set | 13 / 29 | **26 / 29** |
 
-The three stragglers are honest limits, not bugs: one paper has pen marks scribbled over the
-numerals (`2.` OCRs as `KR` — unrecoverable), and one prints no per-question marks anywhere, so
-`marks=null` goes to the reviewer *(prefer missing over wrong)*.
+A second corpus of 27 6th-semester papers (Software Engineering, Compiler Design, E-Governance,
+E-Commerce, NET Centric Computing; 2074–2082) was added on 2026-07-17 and drove the directive and
+numbering fixes above: **288 candidates, 22/27 complete papers, 25 candidates without marks** — of
+which 22 are *correct* nulls (the E-Governance 2074 and SE 2079 Group B print no per-question marks
+anywhere). Future runs must stay at or above both corpora's numbers.
+
+The stragglers are honest limits, not bugs: heavily pen-marked scans lose numerals (`2.` OCRs as
+`KR` or vanishes — unrecoverable), and a paper that prints no per-question marks anywhere correctly
+sends `marks=null` to the reviewer *(prefer missing over wrong)*.
 
 **One-line defense:** *"OCR is a per-page decision with two triggers — an empty text layer, or a
 page that is structurally one big image, because scanners bake in their own garbage OCR layer that a
 character count can't catch. We rasterise at 300 DPI, run Tesseract in single-column mode so the
 number gutter isn't split off as a separate column, and let the splitter accept OCR-shaped numbering
-only on OCR pages. Benchmarked on 29 real TU papers: extraction went from 241 to 368 candidates."*
+only on OCR pages. Benchmarked on 56 real TU papers across two corpora: 368 + 288 candidates,
+48 of 56 papers yield their complete question set."*
 
 ### Ruled tables become markdown (digital pages)
 
@@ -732,8 +751,8 @@ Many questions *are* tables — EVA activity tables, cash-flow rows, CPM network
 `extract_text()` flattens a row `A | 5 | (empty) | 200` to `"A 5 200"`, silently dropping the empty
 cell so you can no longer tell which column the 200 belonged to. On **digital pages**,
 `_extract_text_with_tables` therefore lifts ruled tables out first (`pdfplumber.find_tables()`,
-line strategy, ≥ 2×2 to avoid false positives), reads the prose from *outside* their boxes, and
-splices each table back in **as a markdown table at its vertical position**:
+line strategy, ≥ 2×2), reads the prose from *outside* their boxes, and splices each table back in
+**as a markdown table at its vertical position**:
 
 ```
 | Activity | Duration(days) | precedence | Cost/day (Rs) |
@@ -748,6 +767,14 @@ shows it re-renders the markdown block as a real table: the Vue views via the sh
 the dompdf Blade template, a bordered `addTable()` in the PhpWord DOCX builder). The parser treats
 `|`-prefixed lines as content, never noise — otherwise the all-punctuation `|---|` separator would
 be eaten by the rubbish-line filter.
+
+**Guard against layout frames** (added 2026-07-17): pdfplumber's line strategy also "finds" a table
+in an ordinary Word-style page frame — the TU CSC376 syllabus yielded a 26-row, 2-column grid whose
+second column was empty in all but 3 rows, and wrapping the whole page in pipes hid every heading
+from the anchored parsers (the syllabus parsed **zero units**). `_is_data_table` now requires **at
+least half the detected rows to fill two or more cells** — a real data table distributes content
+across columns; a layout artifact fills one. The EVA-style tables all pass; the frame is rejected
+and the page reads as plain lines.
 
 **Limit (say it before asked):** this is **digital-only**. On a scan the table exists solely in the
 bitmap; Tesseract has no notion of cells, so scanned tables still come out as flattened text rows
@@ -769,7 +796,11 @@ over-long block than to shred one question into five. Line by line:
 ### How the unit/section hint is detected
 
 A line that is *only* a heading — `Unit 3`, `Unit-III`, `Group B`, `Section A` — becomes the
-`unit_hint` carried by every following question (across page breaks) until the next heading. Laravel's
+`unit_hint` carried by every following question (across page breaks) until the next heading. A
+heading fused with its own directive (`Section B [6x5=30]`, the E-Commerce 2075/2076 shape) counts
+too, and supplies the section's per-question marks default at the same time — before this was
+understood, the line fell into the open question above it, where its bracket was summed into that
+question's marks (10 became 40). Laravel's
 `UnitResolver` later matches that free-text hint against the subject's real units; a "Section A" hint
 that matches no unit simply leaves the question **unlinked for the admin to assign** — deliberate,
 not a failure.
@@ -791,6 +822,10 @@ not a failure.
    (a mismatch means OCR mangled a digit → rejected). The default **resets on every new
    Section/Group/Unit heading** — if a section's own directive is lost to OCR, its questions get
    `marks=null` rather than inheriting the previous section's value (*prefer missing over wrong*).
+   Two layout variants are recognised (2026-07-17): the expression pushed onto its **own line below
+   the directive** (`Attempt any Ten questions.` / `(10x6=60)` — both pdfplumber and Tesseract split
+   it when the gap is wide), and the directive **fused onto the section heading** (`Section B
+   [6x5=30]`). A standalone expression with no directive line above it sets nothing.
    A question's own printed marks always beat the default.
 
 **OCR digit folding:** inside a marks token only, `I/l/| → 1` and `o → 0`, and only when the token
@@ -1216,7 +1251,8 @@ Marks come from four printed signals, priority-ordered (§5.6): bracketed arithm
 (`[2+8]` → 10), the word "marks", a wordless trailing paren (`(2+8)`; a bare `(5)` only when it
 agrees with the section directive), and the **section directive** `Attempt any TEN questions
 [10 × 5 = 50]` → a per-question default of 5 for questions with no printed marks — reset on every new
-section heading, and always beaten by explicit marks. OCR digit confusion (`[I + 4]`) is folded only
+section heading, and always beaten by explicit marks. The directive is also recognised when its
+expression lands on the next line, or fused onto the heading itself (`Section B [6x5=30]`). OCR digit confusion (`[I + 4]`) is folded only
 inside marks tokens that already contain a digit. Units: a standalone `Unit 3` / `Section A` /
 `Group B` heading becomes a free-text `unit_hint`; Laravel resolves it against real units and leaves
 unresolvable ones unlinked for the admin. Everything lands `pending` — the review queue absorbs any
@@ -1229,8 +1265,10 @@ Two text sources per page: pdfplumber reads the embedded text layer; pytesseract
 — the second rule exists because photocopied TU papers carry a garbage text layer baked in by the
 scanner's own OCR ("PrinciJrles of Ulanagement") that passes any character count. Tesseract runs in
 `--psm 4` (single-column) so the question-number gutter isn't segmented off as a separate column,
-and the splitter accepts OCR-shaped numbering (`l,` `I.` `1 1.`) *only* on OCR pages. Benchmarked
-on 29 real TU papers: 241 → 368 candidates, 26/29 papers now yield their complete question set.
+and the splitter accepts OCR-shaped numbering (`l,` `I.` `1 1.`, a pen-tick glyph before an intact
+number, a terminator-less first question) *only* on OCR pages. Benchmarked on two corpora — 29 TU
+papers (241 → 368 candidates, 26/29 complete) and 27 6th-semester papers (288 candidates, 22/27
+complete); the stragglers are pen-defaced numerals Tesseract cannot recover.
 
 ### AI / Python (3)
 
@@ -1346,7 +1384,7 @@ abstraction, the queue, the review queue).
 | 14 | Queue stack | Redis + Horizon; jobs `ProcessDocumentUpload`, `ExpandQuestionBank`, `SyncQuestionEmbedding`, `SyncSubjectChunks` (M6) |
 | 15 | Milestone status | M1–M6 (incl. M3.1, M4.1, Post-M5, Post-M5.1) all **Done**; 198 Laravel tests, 153 pytest green per the milestone log |
 | 16 | Past-paper marks signals (priority) | Brackets `[2+8]` → word "marks" → trailing paren `(2+8)` → section directive `[10×5=50]` per-question default (explicit wins; default resets each section; OCR `I→1` fold inside tokens) |
-| 16b | OCR stack + triggers | pdfplumber (text layer) → pypdfium2 raster @300 DPI → pytesseract/Tesseract `--psm 4` (single column). Per-page triggers: text < 40 chars **or** image coverage ≥ 0.8 (scanner's baked-in OCR layer is garbage). Loose numbering (`l,` `I.` `1 1.`) on OCR pages only. Benchmark: 29 TU papers, 241 → 368 candidates |
+| 16b | OCR stack + triggers | pdfplumber (text layer) → pypdfium2 raster @300 DPI → pytesseract/Tesseract `--psm 4` (single column). Per-page triggers: text < 40 chars **or** image coverage ≥ 0.8 (scanner's baked-in OCR layer is garbage). Loose numbering (`l,` `I.` `1 1.`, stray pen-tick glyph before the number, bare first `1`) on OCR pages only. Benchmarks: 29 TU papers 241 → 368 candidates (26/29 complete); 27 6th-sem papers 288 candidates (22/27 complete) |
 | 16c | Tables in questions | Digital pages: `find_tables()` → markdown inside the question text (empty cells preserved); re-rendered as real tables by `QFQuestionText.vue` (UI), `QuestionTextSegments` (PDF `<table>` + DOCX `addTable()`). Scans: still flattened rows — Tesseract has no cell concept |
 | 17 | RAG stack (M6) | Embeddings: `nomic-embed-text` (768-dim) via Python `POST /embed`; vector DB: **Qdrant** (collections `questions` + `chunks`, cosine, point id = MySQL row id); Laravel-only access — an **index, not a database** |
 | 18 | RAG's three uses | ① Semantic dedup in AI expansion (auto-drop ≥ 0.90, `DuplicateDetector`) ② hybrid grounding (`GroundingBuilder`: full ≤ 6000 chars, else top-k chunks + semantic top-3 exemplars) ③ review-queue hints (`similar` flag + 💡 unit suggestions, floor 0.50, suggest-only) |

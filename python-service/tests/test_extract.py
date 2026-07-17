@@ -88,6 +88,15 @@ class TestRuledTables:
         candidates = post_extract(client, table_pdf)["data"]["candidates"]
         assert candidates[0]["marks"] == 10
 
+    def test_a_layout_frame_is_not_a_table(self, client, framed_pdf):
+        # A Word-style page frame detected as a one-filled-column "table" (the
+        # TU CSC376 syllabus shape) must not wrap the page in pipes — that hides
+        # every line from the anchored question and heading patterns.
+        candidates = post_extract(client, framed_pdf)["data"]["candidates"]
+
+        assert [c["number"] for c in candidates] == ["1", "2", "3"]
+        assert all("|" not in c["text"] for c in candidates)
+
 
 class TestJunkTextLayer:
     """A scan whose text layer is the scanner's own garbled OCR must be re-OCR'd."""
