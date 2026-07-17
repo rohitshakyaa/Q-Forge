@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { QFBadge, QFButton, QFCard, QFPageHeader, QFSelect } from '../../components/qf';
-import { useCatalogStore } from '../../stores/catalog';
+import { QFBadge, QFButton, QFCard, QFModal, QFPageHeader, QFSelect } from '../../components/qf';
+import { type BankQuestion, useCatalogStore } from '../../stores/catalog';
 
 const catalog = useCatalogStore();
 
 const search = ref('');
 const subjectFilter = ref('all');
 const typeFilter = ref('All Types');
+const sourceFilter = ref('all');
+const sort = ref<'newest' | 'used'>('newest');
 const page = ref(1);
 
 const subjectOptions = computed(() => [
@@ -15,12 +17,26 @@ const subjectOptions = computed(() => [
   ...catalog.subjects.map((s) => ({ value: s.code, label: `${s.code} – ${s.name}` })),
 ]);
 
+const sourceOptions = [
+  { value: 'all', label: 'All Sources' },
+  { value: 'ai', label: 'AI generated' },
+  { value: 'extracted', label: 'Extracted from PDF' },
+  { value: 'manual', label: 'Typed manually' },
+];
+
+const sortOptions = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'used', label: 'Most used first' },
+];
+
 const load = () =>
   catalog.fetchQuestions({
     status: 'approved',
     subject: subjectFilter.value,
     type: typeFilter.value === 'All Types' ? undefined : typeFilter.value,
+    source: sourceFilter.value === 'all' ? undefined : sourceFilter.value,
     search: search.value || undefined,
+    sort: sort.value === 'used' ? 'used' : undefined,
     page: page.value,
   });
 
@@ -30,13 +46,23 @@ onMounted(async () => {
 });
 
 // Reset to the first page and reload whenever a filter changes.
-watch([subjectFilter, typeFilter, search], () => {
+watch([subjectFilter, typeFilter, sourceFilter, search, sort], () => {
   page.value = 1;
   load();
 });
 watch(page, load);
 
 const meta = computed(() => catalog.questionMeta);
+
+// Long question texts are clamped to two lines in the table; clicking a row opens
+// the full question in a read-only detail popup.
+const detail = ref<BankQuestion | null>(null);
+
+const detailDate = computed(() => {
+  const raw = detail.value?.createdAt;
+
+  return raw ? new Date(raw).toLocaleDateString() : null;
+});
 </script>
 
 <template>
@@ -69,6 +95,12 @@ const meta = computed(() => catalog.questionMeta);
           :options="['All Types', 'Short Answer', 'Long Answer', 'MCQ']"
         />
       </div>
+      <div class="w-full sm:w-44">
+        <QFSelect v-model="sourceFilter" :options="sourceOptions" />
+      </div>
+      <div class="w-full sm:w-44">
+        <QFSelect v-model="sort" :options="sortOptions" />
+      </div>
     </div>
 
     <QFCard>
@@ -85,7 +117,13 @@ const meta = computed(() => catalog.questionMeta);
           </tr>
         </thead>
         <tbody>
-          <tr v-for="q in catalog.questions" :key="q.id">
+          <tr
+            v-for="q in catalog.questions"
+            :key="q.id"
+            style="cursor: pointer"
+            title="Click to view the full question"
+            @click="detail = q"
+          >
             <td style="padding-left: 20px; max-width: 320px">
               <div
                 style="
@@ -162,5 +200,51 @@ const meta = computed(() => catalog.questionMeta);
         >Next ›</QFButton>
       </div>
     </div>
+
+    <!-- QUESTION DETAIL -->
+    <QFModal :open="!!detail" title="Question Detail" :width="620" @close="detail = null">
+      <template v-if="detail">
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px">
+          <QFBadge variant="cyan">{{ detail.subject }}</QFBadge>
+          <QFBadge v-for="u in detail.units" :key="u.id" variant="neutral">{{ u.name }}</QFBadge>
+          <QFBadge variant="neutral">{{ detail.type }}</QFBadge>
+          <QFBadge variant="indigo">{{ detail.marks }} marks</QFBadge>
+        </div>
+
+        <div
+          style="
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--text);
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 50vh;
+            overflow-y: auto;
+            padding: 14px 16px;
+            background: var(--bg1);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+          "
+        >{{ detail.text }}</div>
+
+        <div
+          style="
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 14px;
+            font-size: 12.5px;
+            color: var(--text3);
+          "
+        >
+          <span>Used in {{ detail.used ?? 0 }} paper(s)</span>
+          <span v-if="detail.source">Source: {{ detail.source }}</span>
+          <span v-if="detailDate">Added: {{ detailDate }}</span>
+        </div>
+      </template>
+      <template #footer>
+        <QFButton variant="ghost" @click="detail = null">Close</QFButton>
+      </template>
+    </QFModal>
   </div>
 </template>

@@ -151,6 +151,18 @@ const openAddQuestion = (unitId: number | null = null) => {
   questionModal.text = '';
   questionModal.marks = 5;
   questionModal.type = 'Short Answer';
+  paperError.value = null;
+};
+
+const closeQuestionModal = () => {
+  questionModal.open = false;
+  // Abandoning the modal mid-extraction doesn't cancel anything — the job keeps
+  // running on the queue and stays trackable on the upload page. Only the redirect
+  // into the review queue is dropped.
+  if (paperUploadId.value !== null) {
+    extraction.stopWatching(paperUploadId.value);
+    paperUploadId.value = null;
+  }
 };
 
 // A question can also cover units beyond its primary one.
@@ -177,6 +189,68 @@ const saveQuestion = async () => {
   });
   questionModal.open = false;
 };
+
+// Past-paper upload inside the Add Question modal: same pipeline as the upload page,
+// but pinned to this subject, with progress shown in the modal and a hand-off to the
+// review queue once extraction finishes.
+const paperDragover = ref(false);
+const paperFileInput = ref<HTMLInputElement | null>(null);
+const paperUploadId = ref<number | null>(null);
+const paperError = ref<string | null>(null);
+const paperExamYear = ref('');
+
+const paperUpload = computed(() =>
+  paperUploadId.value === null
+    ? null
+    : extraction.uploads.find((u) => u.id === paperUploadId.value) ?? null,
+);
+
+const uploadPaper = async (file: File) => {
+  if (!subject.value?.id || paperUploadId.value !== null) return;
+  paperError.value = null;
+  try {
+    const upload = await extraction.createUpload({
+      file,
+      type: 'past_paper',
+      subjectId: subject.value.id,
+      examYear: paperExamYear.value.trim() || undefined,
+    });
+    paperUploadId.value = upload.id;
+  } catch (e: unknown) {
+    const response = (e as { response?: { data?: { message?: string } } }).response;
+    paperError.value = response?.data?.message ?? 'Upload failed.';
+  }
+};
+
+const onPaperPick = (e: Event) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) uploadPaper(file);
+  input.value = ''; // Allow re-picking the same file.
+};
+
+const onPaperDrop = (e: DragEvent) => {
+  paperDragover.value = false;
+  const file = e.dataTransfer?.files?.[0];
+  if (file) uploadPaper(file);
+};
+
+// Extraction done → the questions are waiting in the review queue; take the admin
+// straight there, scoped to this upload and subject.
+watch(
+  () => paperUpload.value?.status,
+  (status) => {
+    if (status === 'parsed') {
+      const id = paperUploadId.value;
+      paperUploadId.value = null;
+      questionModal.open = false;
+      router.push({ path: '/admin/review', query: { upload: id, subject: code.value } });
+    } else if (status === 'failed') {
+      paperError.value = paperUpload.value?.error ?? 'Extraction failed.';
+      paperUploadId.value = null;
+    }
+  },
+);
 
 const uploadDragover = ref(false);
 const syllabusFileInput = ref<HTMLInputElement | null>(null);
@@ -237,6 +311,7 @@ watch(
 
 onUnmounted(() => {
   if (syllabusUploadId.value !== null) extraction.stopWatching(syllabusUploadId.value);
+  if (paperUploadId.value !== null) extraction.stopWatching(paperUploadId.value);
 });
 
 const saveSyllabus = async () => {
@@ -587,7 +662,7 @@ const deleteQuestion = async (_unitId: number, questionId: number) => {
         :open="questionModal.open"
         title="Add Question"
         :width="540"
-        @close="questionModal.open = false"
+        @close="closeQuestionModal"
       >
         <div style="display: flex; gap: 8px; margin-bottom: 16px">
           <QFButton
@@ -647,27 +722,66 @@ const deleteQuestion = async (_unitId: number, questionId: number) => {
             />
           </div>
         </div>
-        <div
-          v-else
-          class="qf-dropzone"
-          style="margin: 0"
-          @click="questionModal.open = false"
-        >
-          <div style="font-size: 32px; opacity: 0.5">⬆</div>
-          <div
-            style="
-              font-family: var(--font-head);
-              font-size: 15px;
-              font-weight: 600;
-              color: var(--text2);
-            "
-          >Upload past paper PDF</div>
-          <div style="font-size: 12.5px; color: var(--text3)">
-            AI will extract and classify questions automatically
+        <div v-else>
+          <input
+            ref="paperFileInput"
+            type="file"
+            accept="application/pdf"
+            style="display: none"
+            @change="onPaperPick"
+          />
+
+          <!-- Extraction in flight: the store polls the upload; show its live progress. -->
+          <div v-if="paperUpload" style="padding: 8px 2px">
+            <div style="font-size: 13px; font-weight: 500; margin-bottom: 10px">
+              📄 {{ paperUpload.filename }}
+            </div>
+            <QFProgress
+              :value="paperUpload.progress"
+              ai
+              :label="`Extracting questions… ${paperUpload.progress}%`"
+            />
+            <div style="margin-top: 10px; font-size: 12px; color: var(--text3)">
+              You'll be taken to the review queue when extraction finishes. Closing this
+              dialog won't cancel it — the upload stays on the Past Papers page.
+            </div>
+          </div>
+
+          <template v-else>
+            <div style="margin-bottom: 12px; max-width: 160px">
+              <QFInput v-model="paperExamYear" label="Exam year (optional)" placeholder="e.g. 2023" />
+            </div>
+            <div
+              :class="['qf-dropzone', paperDragover && 'dragover']"
+              style="margin: 0"
+              @dragover.prevent="paperDragover = true"
+              @dragleave="paperDragover = false"
+              @drop.prevent="onPaperDrop"
+              @click="paperFileInput?.click()"
+            >
+              <div style="font-size: 32px; opacity: 0.5">⬆</div>
+              <div
+                style="
+                  font-family: var(--font-head);
+                  font-size: 15px;
+                  font-weight: 600;
+                  color: var(--text2);
+                "
+              >Upload past paper PDF</div>
+              <div style="font-size: 12.5px; color: var(--text3)">
+                AI will extract and classify questions automatically · PDF only
+              </div>
+            </div>
+          </template>
+
+          <div v-if="paperError" style="margin-top: 10px; font-size: 12.5px; color: var(--danger)">
+            {{ paperError }}
           </div>
         </div>
         <template #footer>
-          <QFButton variant="ghost" @click="questionModal.open = false">Cancel</QFButton>
+          <QFButton variant="ghost" @click="closeQuestionModal">
+            {{ paperUpload ? 'Close' : 'Cancel' }}
+          </QFButton>
           <QFButton
             v-if="questionModal.mode === 'type'"
             variant="primary"

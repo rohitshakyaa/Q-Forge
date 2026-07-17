@@ -8,6 +8,8 @@ export interface CatalogQuestion {
   marks: number;
   type: string;
   used?: number;
+  source?: string;
+  createdAt?: string;
   /** Every unit the question is tagged with (primary included). */
   unitIds: number[];
   units: { id: number; name: string }[];
@@ -42,7 +44,11 @@ export interface QuestionFilters {
   unit?: number; // id
   type?: string; // display label
   status?: string;
+  /** 'extracted' | 'ai' | 'manual' */
+  source?: string;
   search?: string;
+  /** 'used' → most-used first; omitted → newest first. */
+  sort?: string;
   page?: number;
   perPage?: number;
 }
@@ -74,6 +80,8 @@ interface ApiQuestion {
   marks: number;
   type: string;
   used_count: number;
+  source?: string;
+  created_at?: string;
   subject_code?: string;
   unit_name?: string;
   unit_ids?: number[];
@@ -102,6 +110,8 @@ const mapQuestion = (q: ApiQuestion): CatalogQuestion => ({
   marks: q.marks,
   type: fromApiType(q.type),
   used: q.used_count,
+  source: q.source,
+  createdAt: q.created_at,
   unitIds: q.unit_ids ?? [],
   units: q.units ?? [],
 });
@@ -214,6 +224,8 @@ export const useCatalogStore = defineStore('catalog', () => {
     };
     if (filters.subject && filters.subject !== 'all') params.subject = filters.subject;
     if (filters.unit) params.unit = filters.unit;
+    if (filters.source) params.source = filters.source;
+    if (filters.sort) params.sort = filters.sort;
     const apiType = toApiType(filters.type);
     if (apiType) params.type = apiType;
     if (filters.search) params.search = filters.search;

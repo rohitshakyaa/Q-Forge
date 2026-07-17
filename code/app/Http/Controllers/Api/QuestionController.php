@@ -13,7 +13,8 @@ class QuestionController extends Controller
 {
     /**
      * Paginated, filterable question bank.
-     * Filters: subject (code), unit (id), type, status, upload (id).
+     * Filters: subject (code), unit (id), type, status, source, upload (id).
+     * Sort: `sort=used` puts the most-used questions first; default is newest first.
      */
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -28,7 +29,9 @@ class QuestionController extends Controller
             ->when($request->filled('unit'), fn ($q) => $q->whereHas('units', fn ($u) => $u->where('units.id', $request->input('unit'))))
             ->when($request->filled('type'), fn ($q) => $q->where('type', $request->input('type')))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->input('status')))
+            ->when($request->filled('source'), fn ($q) => $q->where('source', $request->input('source')))
             ->when($request->filled('search'), fn ($q) => $q->where('text', 'like', '%'.$request->input('search').'%'))
+            ->when($request->input('sort') === 'used', fn ($q) => $q->orderByDesc('used_count'))
             ->orderByDesc('id')
             ->paginate((int) $request->input('per_page', 20))
             ->withQueryString();

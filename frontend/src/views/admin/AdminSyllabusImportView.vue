@@ -51,12 +51,20 @@ const units = ref<UnitDraft[]>([]);
 const courses = computed(() => (upload.value?.courses ?? []).filter((c) => c.units.length > 0));
 const course = computed<Course | undefined>(() => courses.value[selectedIndex.value]);
 
+/** Whether a course's code already resolves to a subject in the bank. */
+const codeInBank = (c: Course) =>
+  Boolean(c.code && catalog.subjects.some((s) => s.code.toLowerCase() === c.code!.toLowerCase()));
+
 const courseOptions = computed(() =>
   courses.value.map((c, i) => ({
     value: String(i),
-    label: `${c.code ?? '—'} · ${c.name ?? 'Untitled course'} (${c.units.length} units)`,
+    label:
+      `${c.code ?? '—'} · ${c.name ?? 'Untitled course'} (${c.units.length} units)` +
+      (codeInBank(c) ? ' — ✓ in bank' : ''),
   })),
 );
+
+const inBankCount = computed(() => courses.value.filter(codeInBank).length);
 
 /** The subject already in the bank with this code, if any. */
 const existingSubject = computed(() =>
@@ -112,6 +120,28 @@ const duplicateNames = computed(() => {
   return clashes;
 });
 
+// The current course is fully in the bank — either the import just finished (the
+// catalog refresh flips every row to "exists") or this is an old, completed import
+// being revisited. Either way there is nothing left to import for this course.
+const fullyImported = computed(
+  () => Boolean(existingSubject.value) && units.value.length > 0 && willAddCount.value === 0,
+);
+
+// The next course worth importing: scans forward (wrapping) for one not yet in the
+// bank, so a multi-subject PDF becomes "import → next → import → next" without any
+// manual re-selection at the top of the page.
+const nextCourseIndex = computed(() => {
+  const n = courses.value.length;
+  if (n < 2) return null;
+
+  for (let step = 1; step < n; step++) {
+    const i = (selectedIndex.value + step) % n;
+    if (!codeInBank(courses.value[i])) return i;
+  }
+
+  return null;
+});
+
 const canImport = computed(
   () =>
     !importing.value &&
@@ -148,6 +178,19 @@ const applyCourse = () => {
 const onCourseChange = (value: string | number) => {
   selectedIndex.value = Number(value);
   applyCourse();
+};
+
+const viewSubject = () => {
+  const code = existingSubject.value?.code ?? subject.code.trim();
+  router.push(`/admin/subjects/${code}`);
+};
+
+/** Jumps to the next un-imported course and scrolls back up to its subject form. */
+const goToNextCourse = () => {
+  if (nextCourseIndex.value === null) return;
+
+  onCourseChange(nextCourseIndex.value);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 const submit = async () => {
@@ -243,20 +286,15 @@ onMounted(async () => {
         to run again after a correction.
       </QFAIHint>
 
-      <div v-if="actionError" style="margin-bottom: 14px; font-size: 13px; color: var(--danger)">
-        {{ actionError }}
-      </div>
-      <div v-if="result" style="margin-bottom: 14px; font-size: 13px; color: var(--success)">
-        {{ result }}
-        <QFButton variant="ghost" size="sm" @click="router.push('/admin/subjects')">
-          View subjects →
-        </QFButton>
-      </div>
-
       <QFCard v-if="courses.length > 1" style="margin-bottom: 20px">
         <div class="qf-card-body">
-          <div style="font-size: 12.5px; color: var(--text3); margin-bottom: 10px">
-            This PDF contains {{ courses.length }} courses. Each import creates one subject.
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px">
+            <span style="font-size: 12.5px; color: var(--text3)">
+              This PDF contains {{ courses.length }} courses. Each import creates one subject.
+            </span>
+            <QFBadge :variant="inBankCount === courses.length ? 'success' : 'neutral'">
+              {{ inBankCount }} / {{ courses.length }} in bank
+            </QFBadge>
           </div>
           <QFSelect
             :model-value="String(selectedIndex)"
@@ -311,7 +349,8 @@ onMounted(async () => {
       <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 0 4px">
         <span style="font-family: var(--font-head); font-weight: 600; font-size: 14px">Units</span>
         <QFBadge variant="neutral">{{ units.length }} parsed</QFBadge>
-        <QFBadge v-if="willAddCount !== units.length" variant="cyan">{{ willAddCount }} will be added</QFBadge>
+        <QFBadge v-if="fullyImported" variant="success">all in bank</QFBadge>
+        <QFBadge v-else-if="willAddCount !== units.length" variant="cyan">{{ willAddCount }} will be added</QFBadge>
         <QFBadge v-if="guessedCount > 0" variant="warn">{{ guessedCount }} name(s) guessed</QFBadge>
         <QFBadge v-if="blankCount > 0" variant="danger">{{ blankCount }} name(s) missing</QFBadge>
       </div>
@@ -369,14 +408,44 @@ onMounted(async () => {
         </div>
       </QFCard>
 
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px">
-        <QFButton
-          variant="secondary"
-          @click="router.push(pinnedCode ? `/admin/subjects/${pinnedCode}` : '/admin/upload')"
-        >Cancel</QFButton>
-        <QFButton variant="primary" :disabled="!canImport" @click="submit">
-          {{ importing ? 'Importing…' : `Import ${willAddCount} unit(s)` }}
-        </QFButton>
+      <!-- Feedback lives next to the actions: after pressing Import the user is at the
+           bottom of a long unit list, so the outcome must be visible without scrolling. -->
+      <div v-if="actionError" style="margin-top: 20px; font-size: 13px; color: var(--danger); text-align: right">
+        {{ actionError }}
+      </div>
+      <div v-else-if="result" style="margin-top: 20px; font-size: 13px; color: var(--success); text-align: right">
+        {{ result }}
+      </div>
+      <div
+        v-else-if="fullyImported"
+        style="margin-top: 20px; font-size: 13px; color: var(--text3); text-align: right"
+      >
+        Every unit of {{ subject.code }} is already in the bank — nothing to import.
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; flex-wrap: wrap">
+        <!-- Done with this course: importing again is pointless, so the primary action
+             becomes reviewing the result (and moving on, for multi-course PDFs). -->
+        <template v-if="fullyImported">
+          <QFButton variant="secondary" @click="router.push('/admin/upload')">
+            Back to uploads
+          </QFButton>
+          <QFButton v-if="nextCourseIndex !== null" variant="secondary" @click="goToNextCourse">
+            Next course →
+          </QFButton>
+          <QFButton variant="primary" @click="viewSubject">
+            View {{ subject.code }} →
+          </QFButton>
+        </template>
+        <template v-else>
+          <QFButton
+            variant="secondary"
+            @click="router.push(pinnedCode ? `/admin/subjects/${pinnedCode}` : '/admin/upload')"
+          >Cancel</QFButton>
+          <QFButton variant="primary" :disabled="!canImport" @click="submit">
+            {{ importing ? 'Importing…' : `Import ${willAddCount} unit(s)` }}
+          </QFButton>
+        </template>
       </div>
     </template>
   </div>
