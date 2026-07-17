@@ -89,8 +89,20 @@ export interface Candidate {
   uploadId: number | null;
   /** M6: nearest approved lookalike found at extraction time (flag-only — the reviewer decides). */
   similar: SimilarQuestion | null;
-  /** M6 Phase 3: ranked unit suggestions, best first (pre-fill only — units stay human-assigned). */
+  /** M6 Phase 3: ranked unit suggestions, best first. The top one may auto-assign (see autoAssigned). */
   suggestedUnits: SuggestedUnit[];
+  /**
+   * M6 Phase 3b: set when the backend pre-tagged `unitId` from the top RAG
+   * suggestion. Cleared server-side once a human explicitly picks a unit.
+   */
+  autoAssigned: AutoAssignedUnit | null;
+}
+
+/** `attributes.unit_auto_assigned` — written by the backend when it pre-tags a unit. */
+export interface AutoAssignedUnit {
+  unitId: number;
+  /** The top suggestion's chunk similarity, in [0, 1]. */
+  score: number;
 }
 
 /** One entry of `attributes.suggested_units`. */
@@ -208,6 +220,7 @@ const mapCandidate = (q: ApiCandidate): Candidate => {
   const attrs = q.attributes ?? {};
   const similar = attrs.similar as { question_id?: number; score?: number } | undefined;
   const suggested = (attrs.suggested_units as Array<{ unit_id?: number; score?: number }> | undefined) ?? [];
+  const autoAssigned = attrs.unit_auto_assigned as { unit_id?: number; score?: number } | undefined;
 
   return {
     id: q.id,
@@ -232,6 +245,10 @@ const mapCandidate = (q: ApiCandidate): Candidate => {
     suggestedUnits: suggested
       .filter((s) => s.unit_id != null && s.score != null)
       .map((s) => ({ unitId: s.unit_id as number, score: s.score as number })),
+    autoAssigned:
+      autoAssigned?.unit_id != null && autoAssigned?.score != null
+        ? { unitId: autoAssigned.unit_id, score: autoAssigned.score }
+        : null,
   };
 };
 

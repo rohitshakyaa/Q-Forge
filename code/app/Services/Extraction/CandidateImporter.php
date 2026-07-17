@@ -40,10 +40,9 @@ class CandidateImporter
 
         $created = 0;
         $skipped = 0;
-        $unlinked = 0;
         $createdQuestions = [];
 
-        DB::transaction(function () use ($upload, $candidates, $resolver, $existing, &$created, &$skipped, &$unlinked, &$createdQuestions) {
+        DB::transaction(function () use ($upload, $candidates, $resolver, $existing, &$created, &$skipped, &$createdQuestions) {
             foreach ($candidates as $candidate) {
                 $text = trim((string) ($candidate['text'] ?? ''));
                 if ($text === '') {
@@ -59,9 +58,6 @@ class CandidateImporter
                 $existing[$fingerprint] = true;
 
                 $unit = $resolver->resolve($candidate['unit_hint'] ?? null);
-                if ($unit === null) {
-                    $unlinked++;
-                }
 
                 $question = Question::create([
                     'subject_id' => $upload->subject_id,
@@ -91,9 +87,14 @@ class CandidateImporter
 
         // M6 Phase 1: flag candidates that paraphrase an approved bank question
         // ("similar to Q#123 (0.93)") so the reviewer decides — never auto-drop
-        // here. After the transaction: annotation is best-effort and must not
-        // roll back the import.
+        // here. Phase 3b may also pre-tag untagged candidates from their unit
+        // suggestions. After the transaction: annotation is best-effort and
+        // must not roll back the import.
         $this->similar->annotate($createdQuestions);
+
+        // Counted after annotation on purpose: auto-assignment may have tagged
+        // some of what the heading resolver could not.
+        $unlinked = count(array_filter($createdQuestions, fn (Question $q) => $q->unit_id === null));
 
         return ['created' => $created, 'skipped' => $skipped, 'unlinked' => $unlinked];
     }

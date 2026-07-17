@@ -7,7 +7,9 @@ from ..config import get_settings
 def image_to_text(image: Image.Image) -> str:
     """Run Tesseract over a rasterised page."""
     settings = get_settings()
-    return pytesseract.image_to_string(image, lang=settings.ocr_language)
+    return pytesseract.image_to_string(
+        image, lang=settings.ocr_language, config=f"--psm {settings.ocr_psm}"
+    )
 
 
 def page_to_image(page) -> Image.Image:

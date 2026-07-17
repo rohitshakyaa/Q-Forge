@@ -507,10 +507,27 @@ annotator, extended — the two hints share one embedding pass) adds
 
 In the review queue ([`AdminExtractionView.vue`](../frontend/src/views/admin/AdminExtractionView.vue)),
 untagged candidates show clickable chips — `💡 Planning and Decision Making · 75%` — and opening
-the edit form pre-selects the top suggestion. **Suggest-only, by project decision** (Post-M5:
-unit tags are human-assigned): a click applies the suggestion to the form, approval still
-requires the human. A unit with no indexed content can never be suggested — expected; the
-dropdown still lists every unit.
+the edit form pre-selects the top suggestion. A unit with no indexed content can never be
+suggested — expected; the dropdown still lists every unit.
+
+### Phase 3b — auto-assign (supersedes the Post-M5 suggest-only rule)
+
+When the parser found **no unit heading** and the *top* suggestion clears
+`RAG_UNIT_AUTO_ASSIGN_THRESHOLD` (default 0.50 — a separate knob from the suggestion floor, so
+pre-tagging can demand more than suggesting), the candidate is **pre-tagged** with that unit as
+its primary at extraction time:
+
+- Only the top unit is assigned — the rest stay as chips; "also covers" remains human-only.
+- A parser-resolved unit is never overridden, and a suggestion citing a unit that no longer
+  exists under the candidate's subject is ignored (the chunk index can lag MySQL).
+- Provenance lands in `attributes.unit_auto_assigned` (`{unit_id, score}`); the review queue
+  badges pending candidates `auto-assigned · 75%`. The flag is cleared server-side the moment a
+  human explicitly picks a unit (edit-save or approve with a unit in the payload).
+- The candidate stays `pending` — approval is still the only gate into the generator — but it
+  now groups under its unit and passes the bulk **Approve All** completeness check.
+
+Candidates imported before this rule existed can be backfilled from their stored suggestions
+(no re-embedding): `php artisan qforge:rag:auto-assign-units` (`--dry-run` to preview).
 
 ### Seen working
 

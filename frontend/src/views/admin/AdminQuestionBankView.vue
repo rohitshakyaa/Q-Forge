@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { QFBadge, QFButton, QFCard, QFModal, QFPageHeader, QFSelect } from '../../components/qf';
+import { QFBadge, QFButton, QFCard, QFModal, QFPageHeader, QFQuestionText, QFSelect } from '../../components/qf';
 import { type BankQuestion, useCatalogStore } from '../../stores/catalog';
 
 const catalog = useCatalogStore();
@@ -216,7 +216,6 @@ const detailDate = computed(() => {
             font-size: 14px;
             line-height: 1.7;
             color: var(--text);
-            white-space: pre-wrap;
             word-break: break-word;
             max-height: 50vh;
             overflow-y: auto;
@@ -225,7 +224,7 @@ const detailDate = computed(() => {
             border: 1px solid var(--border);
             border-radius: var(--radius);
           "
-        >{{ detail.text }}</div>
+        ><QFQuestionText :text="detail.text" /></div>
 
         <div
           style="

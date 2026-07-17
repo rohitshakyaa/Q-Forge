@@ -18,11 +18,21 @@ class Settings(BaseSettings):
     # as scanned, and re-read with OCR.
     ocr_char_threshold: int = 40
 
+    # A page whose embedded images cover at least this fraction of its area is a
+    # scan regardless of how much text it yields: that text is the scanner's own
+    # (routinely garbled) OCR layer, and a fresh Tesseract pass beats it.
+    ocr_image_coverage: float = 0.8
+
     # Rasterisation DPI for the OCR fallback. 300 is the sweet spot for Tesseract;
     # lower loses small print, higher costs time for no accuracy gain.
     ocr_dpi: int = 300
 
     ocr_language: str = "eng"
+
+    # Tesseract page-segmentation mode. 4 (single column, variable text sizes)
+    # fits exam papers: the default auto mode (3) splits the question-number
+    # gutter into its own column, detaching every number from its question.
+    ocr_psm: int = 4
 
     # M5 — LLM provider for /generate-questions. These read the plain, unprefixed
     # env names (OLLAMA_URL, ...) via validation_alias, matching docker-compose and

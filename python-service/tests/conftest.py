@@ -67,3 +67,62 @@ def scanned_pdf(shared_root: Path, digital_pdf: Path) -> Path:
 
     images[0].save(path, "PDF", save_all=True, append_images=images[1:])
     return path
+
+
+@pytest.fixture(scope="session")
+def table_pdf(shared_root: Path) -> Path:
+    """A digital paper whose question carries a ruled table (the EVA shape).
+
+    The Precedence cell of activity A is deliberately empty: flattened text
+    loses that information ("A 5 200"), the markdown rendering must keep it.
+    """
+    path = shared_root / "table.pdf"
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=14)
+    pdf.cell(0, 10, "1. Perform Earned Value Analysis of the project. [10]", new_x="LMARGIN", new_y="NEXT")
+    rows = [
+        ("Activity", "Duration", "Precedence", "Cost/day"),
+        ("A", "5", "", "200"),
+        ("B", "5", "A", "200"),
+        ("C", "10", "A", "100"),
+    ]
+    for row in rows:
+        for cell in row:
+            pdf.cell(38, 8, cell, border=1)
+        pdf.ln()
+    pdf.cell(0, 10, "Calculate SV, SPI, CV and CPI respectively.", new_x="LMARGIN", new_y="NEXT")
+    pdf.output(str(path))
+    return path
+
+
+@pytest.fixture(scope="session")
+def junk_layer_pdf(shared_root: Path, digital_pdf: Path) -> Path:
+    """A scan with the scanner's own garbled OCR baked in as the text layer.
+
+    The real shape of the shared TU past papers: one full-page image, plus an
+    embedded text layer long enough to pass any character count but useless
+    ("PrinciJrles of Ulanagement"). Extraction must ignore that layer and OCR
+    the image instead.
+    """
+    path = shared_root / "junk-layer.pdf"
+    with pdfplumber.open(digital_pdf) as doc:
+        image = doc.pages[0].to_image(resolution=150).original.convert("RGB")
+
+    image_path = shared_root / "junk-layer-page.png"
+    image.save(image_path)
+
+    pdf = FPDF(unit="pt", format=(image.width, image.height))
+    pdf.add_page()
+    pdf.image(str(image_path), x=0, y=0, w=image.width, h=image.height)
+    pdf.set_font("Helvetica", size=10)
+    pdf.set_text_color(255, 255, 255)  # invisible-ish, like a real OCR layer
+    for line in [
+        "l-ribhuvan Uuiversity",
+        "Carrdidate.s ure recluirecl trt give lheir onsv,et',s",
+        "I' Deflne a hasli collisiorr. i5l",
+        "2' Explairr thc diff'erence betrveen Blrs ancl DIrS. (lo rnarks)",
+    ]:
+        pdf.cell(0, 14, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.output(str(path))
+    return path

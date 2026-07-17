@@ -63,10 +63,38 @@ class PaperWordBuilder
             $section->addTextBreak(1);
 
             foreach ($sec['questions'] as $q) {
+                // Extracted questions may embed markdown tables — the first prose
+                // segment shares the numbered line; tables become real Word tables.
+                $segments = QuestionTextSegments::parse($q['text']);
+
                 $line = $section->addTextRun(['spaceAfter' => 120]);
                 $line->addText("{$q['no']}.  ", ['bold' => true]);
-                $line->addText($q['text']);
+                if (($segments[0]['kind'] ?? null) === 'prose') {
+                    $line->addText(array_shift($segments)['text']);
+                }
                 $line->addText("    [{$q['marks']} Marks]", ['bold' => true, 'size' => 10, 'color' => '444444']);
+
+                foreach ($segments as $seg) {
+                    if ($seg['kind'] === 'prose') {
+                        $section->addText($seg['text'], [], ['spaceAfter' => 120, 'indentation' => ['left' => 360]]);
+
+                        continue;
+                    }
+
+                    $table = $section->addTable([
+                        'borderSize' => 4,
+                        'borderColor' => '555555',
+                        'cellMargin' => 60,
+                        'indentation' => 360,
+                    ]);
+                    foreach ($seg['rows'] as $index => $row) {
+                        $table->addRow();
+                        foreach ($row as $cell) {
+                            $table->addCell(1800)->addText($cell, ['bold' => $index === 0, 'size' => 10]);
+                        }
+                    }
+                    $section->addTextBreak(1);
+                }
             }
 
             $section->addTextBreak(1);

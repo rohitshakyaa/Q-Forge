@@ -20,9 +20,12 @@ export interface Paper {
   id: number | null;
   name: string;
   subject: string;
+  subjectName: string | null;
   marks: number;
   questions: number;
   date: string;
+  /** Raw ISO timestamp behind `date` — kept for client-side date filtering. */
+  generatedAt: string | null;
   status: 'exported' | 'saved' | 'draft';
   exports: number;
   duration: number;
@@ -70,6 +73,7 @@ interface ApiPaper {
   id: number | null;
   name: string;
   subject: string;
+  subject_name?: string | null;
   marks: number;
   duration: number;
   status: 'draft' | 'saved' | 'exported';
@@ -107,9 +111,11 @@ const mapPaper = (p: ApiPaper): Paper => ({
   id: p.id,
   name: p.name,
   subject: p.subject,
+  subjectName: p.subject_name ?? null,
   marks: p.marks,
   questions: p.questions,
   date: formatDate(p.generated_at),
+  generatedAt: p.generated_at,
   status: p.status,
   exports: p.export_count ?? 0,
   duration: p.duration,

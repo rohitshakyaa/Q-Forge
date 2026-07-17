@@ -67,6 +67,45 @@ class TestScannedPdf:
         assert any(c["marks"] == 5 for c in candidates)
 
 
+class TestRuledTables:
+    """A ruled table on a digital page is rendered as markdown, not flattened."""
+
+    def test_table_becomes_markdown_inside_its_question(self, client, table_pdf):
+        candidates = post_extract(client, table_pdf)["data"]["candidates"]
+
+        assert len(candidates) == 1, "the table must stay inside its question"
+        text = candidates[0]["text"]
+
+        assert "| Activity | Duration | Precedence | Cost/day |" in text
+        assert "|---|---|---|---|" in text
+        # The empty Precedence cell survives — flattened text would say "A 5 200".
+        # (the parser's whitespace cleanup collapses the empty cell to a single space)
+        assert "| A | 5 | | 200 |" in text
+        # Prose above and below the table keeps its reading order.
+        assert text.index("Earned Value") < text.index("| Activity |") < text.index("Calculate SV")
+
+    def test_marks_are_still_read_around_the_table(self, client, table_pdf):
+        candidates = post_extract(client, table_pdf)["data"]["candidates"]
+        assert candidates[0]["marks"] == 10
+
+
+class TestJunkTextLayer:
+    """A scan whose text layer is the scanner's own garbled OCR must be re-OCR'd."""
+
+    def test_full_page_image_forces_ocr_despite_a_long_text_layer(self, client, junk_layer_pdf):
+        body = post_extract(client, junk_layer_pdf)
+
+        assert body["status"] == "success"
+        assert body["data"]["ocr_pages"] == 1, "the junk layer should not have been trusted"
+
+    def test_candidates_come_from_tesseract_not_the_junk_layer(self, client, junk_layer_pdf):
+        candidates = post_extract(client, junk_layer_pdf)["data"]["candidates"]
+        combined = " ".join(c["text"] for c in candidates).lower()
+
+        assert "hash collision" in combined
+        assert "recluirecl" not in combined, "text came from the garbled embedded layer"
+
+
 class TestSyllabus:
     def test_syllabus_is_read_but_yields_no_questions(self, client, digital_pdf):
         body = post_extract(client, digital_pdf, type_="syllabus")

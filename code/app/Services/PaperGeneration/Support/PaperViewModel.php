@@ -92,6 +92,7 @@ class PaperViewModel
             'id' => $this->paper->id,
             'name' => $this->paper->name,
             'subject' => $header['subject'],
+            'subject_name' => $this->paper->subject?->name,
             'marks' => $header['marks'],
             'duration' => $header['duration'],
             'status' => $this->paper->status,

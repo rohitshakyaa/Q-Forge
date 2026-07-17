@@ -84,6 +84,12 @@ return [
         // the candidate. Lower than the duplicate threshold on purpose:
         // "about the same topic" is a much looser bar than "the same question".
         'unit_suggestion_min_score' => (float) env('RAG_UNIT_SUGGESTION_MIN_SCORE', 0.50),
+
+        // Phase 3b — an untagged candidate whose *top* suggestion clears this
+        // bar is auto-assigned that unit as its primary (still pending, still
+        // human-reviewed). Separate from the suggestion floor so the two can
+        // diverge: suggesting is cheap, pre-tagging should be able to demand more.
+        'unit_auto_assign_threshold' => (float) env('RAG_UNIT_AUTO_ASSIGN_THRESHOLD', 0.50),
     ],
 
 ];

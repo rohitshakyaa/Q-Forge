@@ -65,6 +65,11 @@ class QuestionController extends Controller
         $unitIds = $data['unit_ids'] ?? null;
         unset($data['unit_ids']);
 
+        // A human explicitly chose the unit — the auto-assign badge no longer applies.
+        if (($data['unit_id'] ?? null) !== null) {
+            $question->clearUnitAutoAssigned();
+        }
+
         $question->update($data);
         $question->syncUnitLinks($unitIds);
         $question->load(['subject', 'unit', 'units']);

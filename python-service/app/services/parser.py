@@ -15,9 +15,15 @@ from .pdf import PageText
 # question above or MCQ options, and splitting on them shreds both.
 _QUESTION_START = re.compile(r"^(?:Q\s*\.?\s*)?(\d{1,2})\s*[.)]\s*")
 
+# On OCR'd pages Tesseract misreads the numbering itself: "1." comes out as
+# "l," or "I.", and "11." as "1 1.". Accept those shapes there — but only there,
+# since a digital page never prints them. A comma terminator must not be
+# followed by a digit, or the "40,000" of a cash-flow table becomes question 40.
+_QUESTION_START_OCR = re.compile(r"^(?:Q\s*\.?\s*)?([\dIl|]\s?\d?)\s*(?:[.)]|,(?!\d))\s*")
+
 # "Unit 3", "Unit-III", "Group B", "Section A" printed on a line of their own.
 _UNIT_HINT = re.compile(
-    r"^\s*((?:unit|group|section)\s*[-–—:]?\s*(?:\d{1,2}|[ivxIVX]{1,5}|[A-H]))\s*[:.]?\s*$",
+    r"^\s*((?:unit|group|section)\s*[-–—:]?\s*(?:\d{1,2}|[ivxIVX]{1,5}|[A-H]))\s*[:.;]?\s*$",
     re.IGNORECASE,
 )
 
@@ -41,6 +47,11 @@ _MARKS_EXPR = re.compile(r"^[\d\s.+x×*=]+$", re.IGNORECASE)
 # lower-casing, and only when the token already carries a real digit, so a
 # roman-numeral citation "[i]" is still rejected as non-arithmetic.
 _OCR_DIGITS = str.maketrans({"i": "1", "l": "1", "|": "1", "o": "0"})
+
+# The same misreads in a question number ("I." for "1."). No "o" here: a number
+# is never letter-O in these papers, but "I" (unlike in marks, where "[i]" is a
+# citation) is safe to read as 1 because the OCR start pattern already vetted it.
+_OCR_DIGITS_UPPER = str.maketrans({"I": "1", "i": "1", "l": "1", "|": "1"})
 
 # The section directive: "Attempt any TEN questions. [10 x 5 = 50]". Many TU
 # papers (the MGT411 set among them) print marks nowhere else — the directive's
@@ -92,6 +103,12 @@ _MIN_OPTIONS_FOR_MCQ = 3
 
 
 def is_noise(line: str) -> bool:
+    # Markdown table rows (pdf.py renders ruled tables that way) are content,
+    # never noise — the all-punctuation separator "|---|---|" would otherwise
+    # match the \W+ rule and punch a hole in the table.
+    if line.lstrip().startswith("|"):
+        return False
+
     return bool(_NOISE.match(line))
 
 
@@ -329,10 +346,11 @@ def parse_pages(pages: list[PageText]) -> list[Candidate]:
             if is_noise(stripped):
                 continue
 
-            match = _QUESTION_START.match(stripped)
+            start_pattern = _QUESTION_START_OCR if page.ocr else _QUESTION_START
+            match = start_pattern.match(stripped)
             if match:
                 flush()
-                number = match.group(1)
+                number = re.sub(r"\s+", "", match.group(1)).translate(_OCR_DIGITS_UPPER)
                 start_page = page.number
                 start_ocr = page.ocr
                 # Papers contain typos like "9.." — drop punctuation the numbering
@@ -340,7 +358,10 @@ def parse_pages(pages: list[PageText]) -> list[Candidate]:
                 remainder = re.sub(r"^[.)\s]+", "", stripped[match.end() :]).strip()
                 if remainder:
                     buffer.append(remainder)
-            elif buffer:
+            elif number is not None:
+                # A question is open — even if its number stood alone on its own
+                # line and the buffer is still empty (pdfplumber renders many TU
+                # papers exactly that way: "5." on one line, the text below it).
                 buffer.append(stripped)
             # Text before the first numbered question is preamble — dropped.
 

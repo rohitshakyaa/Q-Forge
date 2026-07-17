@@ -38,6 +38,11 @@ class QuestionReviewController extends Controller
 
         $question->fill(array_filter($data, fn ($value) => $value !== null));
 
+        // A human explicitly chose the unit — the auto-assign badge no longer applies.
+        if (($data['unit_id'] ?? null) !== null) {
+            $question->clearUnitAutoAssigned();
+        }
+
         $this->assertUnitBelongsToSubject($question);
         $this->assertUnitSetIsCoherent($question, $unitIds);
         $this->assertReadyForApproval($question);

@@ -264,6 +264,79 @@ class TestParsePages:
         assert len(result) == 1
         assert result[0].page == 1
 
+    def test_markdown_table_rows_are_content_not_noise(self):
+        # pdf.py renders ruled tables as markdown; the all-punctuation separator
+        # row must not be eaten by the \W+ noise rule.
+        assert is_noise("|---|---|---|") is False
+        assert is_noise("| A | 5 |  | 200 |") is False
+
+        text = "\n".join(
+            [
+                "1. Perform Earned Value Analysis. [10]",
+                "| Activity | Duration |",
+                "|---|---|",
+                "| A | 5 |",
+                "Calculate SV and CPI.",
+            ]
+        )
+        result = parse_pages([page(text)])
+        assert len(result) == 1
+        assert "|---|---|" in result[0].text
+        assert "| A | 5 |" in result[0].text
+
+    def test_a_number_alone_on_its_own_line_keeps_its_question(self):
+        # pdfplumber renders many TU papers this way: "5." on one line, the text
+        # below it. The text must attach to the open question, not be dropped.
+        text = "\n".join(
+            [
+                "1.",
+                "State and explain the emerging challenges for management. [10]",
+                "2.",
+                "Define business environment and explain its basic components. [10]",
+            ]
+        )
+        first, second = parse_pages([page(text)])
+        assert first.number == "1"
+        assert "emerging challenges" in first.text
+        assert second.number == "2"
+        assert "business environment" in second.text
+
+
+class TestOcrNumbering:
+    """Tesseract misreads the numbering itself on scanned pages."""
+
+    @pytest.mark.parametrize(
+        ("line", "number"),
+        [
+            ("l, Introduce organizational goal. Describe goal formulation.", "1"),
+            ("I. Perform Earned Value Analysis of the given project data.", "1"),
+            ("|. Define organizational goals. Explain the formulation process.", "1"),
+            ("1 1. Explain the interpersonal and nonverbal communication styles.", "11"),
+        ],
+    )
+    def test_misread_numbers_start_questions_on_ocr_pages(self, line, number):
+        result = parse_pages([page(line, ocr=True)])
+        assert len(result) == 1
+        assert result[0].number == number
+
+    def test_misread_numbers_are_not_accepted_on_digital_pages(self):
+        result = parse_pages([page("l, Introduce organizational goal and describe it.", ocr=False)])
+        assert result == []
+
+    def test_a_cash_flow_row_does_not_start_a_question(self):
+        # "40,000" must not become question 40: comma + digit is a thousands
+        # separator, not a numbering terminator.
+        text = "\n".join(
+            [
+                "4. Which project would you choose from the following and why?",
+                "40,000 for project A in year one",
+            ]
+        )
+        result = parse_pages([page(text, ocr=True)])
+        assert len(result) == 1
+        assert result[0].number == "4"
+        assert "40,000 for project A" in result[0].text
+
 
 class TestSectionDefaultMarks:
     """Papers that print marks only on the section directive (the TU MGT411 set)."""

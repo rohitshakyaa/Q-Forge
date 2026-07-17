@@ -12,3 +12,4 @@ export { default as QFEmptyState } from './QFEmptyState.vue';
 export { default as QFPageHeader } from './QFPageHeader.vue';
 export { default as QFSteps } from './QFSteps.vue';
 export { default as QFChip } from './QFChip.vue';
+export { default as QFQuestionText } from './QFQuestionText.vue';

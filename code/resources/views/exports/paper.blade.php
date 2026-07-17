@@ -18,6 +18,10 @@
         .q { margin-bottom: 10px; }
         .q-no { font-weight: bold; color: #0a7; }
         .q-marks { font-weight: bold; color: #444; float: right; }
+        .q-prose { white-space: pre-line; }
+        .q-table { border-collapse: collapse; margin: 6px 0 6px 18px; font-size: 11px; }
+        .q-table th, .q-table td { border: 1px solid #555; padding: 3px 8px; text-align: left; }
+        .q-table th { background: #f0f0f0; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -39,7 +43,23 @@
         @foreach($sec['questions'] as $q)
             <div class="q">
                 <span class="q-marks">[{{ $q['marks'] }} Marks]</span>
-                <span class="q-no">{{ $q['no'] }}.</span> {{ $q['text'] }}
+                <span class="q-no">{{ $q['no'] }}.</span>
+                {{-- Extracted questions may embed markdown tables — render them as real tables --}}
+                @foreach(\App\Services\Export\QuestionTextSegments::parse($q['text']) as $seg)
+                    @if($seg['kind'] === 'prose')
+                        <span class="q-prose">{{ $seg['text'] }}</span>
+                    @else
+                        <table class="q-table">
+                            @foreach($seg['rows'] as $r => $row)
+                                <tr>
+                                    @foreach($row as $cell)
+                                        @if($r === 0)<th>{{ $cell }}</th>@else<td>{{ $cell }}</td>@endif
+                                    @endforeach
+                                </tr>
+                            @endforeach
+                        </table>
+                    @endif
+                @endforeach
             </div>
         @endforeach
     @endforeach

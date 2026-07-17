@@ -641,12 +641,119 @@ The past-paper pipeline: upload (`type=past_paper`) → `ProcessDocumentUpload` 
 `questions` rows with `source=extracted`, `status=pending`. Nothing reaches the generator until an
 admin approves it in the review queue.
 
-### Page text (with per-page OCR fallback)
+### The OCR stack — packages and what each one does
 
-`extract_pages` reads each page's text layer with **pdfplumber**; if a page yields fewer characters
-than a threshold it falls back to **Tesseract OCR** *for that page only* — real TU papers are
-routinely mixed (a digital cover sheet in front of photocopied question pages). Every candidate
-records which page it came from and whether OCR was used (`page`, `ocr` provenance).
+Four libraries cooperate in [`pdf.py`](../python-service/app/services/pdf.py) /
+[`ocr.py`](../python-service/app/services/ocr.py):
+
+| Package | Role |
+|---|---|
+| **pdfplumber** (on pdfminer.six) | Reads the PDF's *embedded text layer* — the characters a born-digital PDF carries natively. Also exposes page geometry: size and the bounding boxes of embedded **images**, which is how we detect scans (below). |
+| **pypdfium2** | Rasterises a page to a bitmap (`page.to_image(resolution=300)`) when OCR is needed — no ImageMagick/Ghostscript dependency. |
+| **Pillow (PIL)** | Carries that bitmap between pdfium and Tesseract. |
+| **pytesseract → Tesseract** | The actual OCR engine: takes the 300-DPI page image, returns plain text. 300 DPI is the sweet spot — lower loses small print, higher costs time for no accuracy gain. |
+
+So there are **two possible sources of a page's text**: the embedded layer (free, perfect for
+born-digital PDFs) or a fresh Tesseract pass (slow, needed for scans). The whole game is deciding
+*per page* which source to trust.
+
+### When OCR triggers — two rules, not one
+
+The decision is **per page**, because real TU papers are routinely mixed (a digital cover sheet in
+front of photocopied question pages). A page is treated as scanned when **either**:
+
+1. **The text layer is near-empty** (`ocr_char_threshold`, default 40 chars) — a pure image scan
+   with no text layer at all. This was the original rule.
+2. **Embedded images cover ≥ 80 % of the page area** (`ocr_image_coverage`, default 0.8) — added
+   after testing against 29 real TU papers. The 2079–2083 scans carry a text layer *baked in by the
+   scanner's own OCR*, and it is garbage — `"PrinciJrles of Ulanagement"`, `"Carrdidate.s ure
+   recluirecl"` — yet long enough to sail past any character count, so rule 1 alone happily trusted
+   gibberish. The structural check is decisive: on all 29 test papers, scans measured **1.00**
+   coverage (one full-page image) and born-digital pages **0.00–0.29** (small logos only). An image
+   page's text layer is never trusted; Tesseract at 300 DPI beats scanner OCR every time.
+
+Every candidate records which page it came from and whether OCR was used (`page`, `ocr`
+provenance) — the review UI can show "this came from OCR, read it twice".
+
+### Page segmentation — why `--psm 4` matters
+
+Tesseract doesn't just read characters; it first *segments* the page into blocks, and the wrong
+segmentation scrambles line order. Its default mode (`--psm 3`, fully automatic) saw the question
+**number gutter as a separate column** — it returned `1.` `2.` `3.` `4.` as one block and the four
+question texts as another, detaching every number from its question, so the splitter found one giant
+"question 1". We run **`--psm 4` — "assume a single column of text of variable sizes"** — which
+matches the physical shape of an exam paper and keeps `1. Define management…` together on one line.
+That single flag took several papers from 2–5 mangled candidates to a complete, correctly numbered
+set. Configurable as `ocr_psm`.
+
+### OCR-tolerant question numbering (parser side)
+
+Even good OCR misreads the *numbering itself*: `1.` comes out as `l,` / `I.` / `|.`, and `11.` as
+`1 1.`. The splitter therefore uses **two start patterns** — the strict one (`1.`, `1)`, `Q3.`) on
+digital pages, and a looser one on OCR pages only that additionally accepts `I/l/|` as `1`, a comma
+as the terminator, and a space inside the number. Guard rail: a comma terminator must **not** be
+followed by a digit, so the `40,000` in a cash-flow table can never become "question 40". The
+misread shapes are folded back (`I→1`, `1 1→11`) before the number is stored. Digital pages never
+see the loose pattern — a born-digital PDF simply doesn't print `l,` — so this can't cause
+regressions where OCR isn't involved.
+
+Two more parser fixes came out of the same 29-paper test run:
+
+- **A number alone on its own line keeps its question.** pdfplumber renders many TU papers as `5.`
+  on one line and the text below it; the splitter used to treat the following text as droppable
+  preamble because the question's buffer was still empty — silently losing questions 1–9 of the
+  MGT411 2079 paper. An open question now claims following lines even when its number stood alone.
+- **Unit headings tolerate OCR residue** — `Group A ;` still matches as a heading.
+
+### Measured result (the 29-PDF benchmark)
+
+Tested against 29 real TU past papers (SPM, Data Mining, Principles of Management, Advanced Java,
+years 2069–2083 — a mix of born-digital PDFs and photocopied scans):
+
+| Metric | Before | After |
+|---|---|---|
+| Total candidates extracted | 241 | **368** |
+| Candidates missing marks | 44 | **17** |
+| Papers yielding their complete question set | 13 / 29 | **26 / 29** |
+
+The three stragglers are honest limits, not bugs: one paper has pen marks scribbled over the
+numerals (`2.` OCRs as `KR` — unrecoverable), and one prints no per-question marks anywhere, so
+`marks=null` goes to the reviewer *(prefer missing over wrong)*.
+
+**One-line defense:** *"OCR is a per-page decision with two triggers — an empty text layer, or a
+page that is structurally one big image, because scanners bake in their own garbage OCR layer that a
+character count can't catch. We rasterise at 300 DPI, run Tesseract in single-column mode so the
+number gutter isn't split off as a separate column, and let the splitter accept OCR-shaped numbering
+only on OCR pages. Benchmarked on 29 real TU papers: extraction went from 241 to 368 candidates."*
+
+### Ruled tables become markdown (digital pages)
+
+Many questions *are* tables — EVA activity tables, cash-flow rows, CPM networks. Naive
+`extract_text()` flattens a row `A | 5 | (empty) | 200` to `"A 5 200"`, silently dropping the empty
+cell so you can no longer tell which column the 200 belonged to. On **digital pages**,
+`_extract_text_with_tables` therefore lifts ruled tables out first (`pdfplumber.find_tables()`,
+line strategy, ≥ 2×2 to avoid false positives), reads the prose from *outside* their boxes, and
+splices each table back in **as a markdown table at its vertical position**:
+
+```
+| Activity | Duration(days) | precedence | Cost/day (Rs) |
+|---|---|---|---|
+| A | 8 | | 200 |
+```
+
+The question text stays a plain string end to end (DB, API, embeddings) — but every surface that
+shows it re-renders the markdown block as a real table: the Vue views via the shared
+[`QFQuestionText`](../frontend/src/components/qf/QFQuestionText.vue) component, and both exports via
+[`QuestionTextSegments`](../code/app/Services/Export/QuestionTextSegments.php) (an HTML `<table>` in
+the dompdf Blade template, a bordered `addTable()` in the PhpWord DOCX builder). The parser treats
+`|`-prefixed lines as content, never noise — otherwise the all-punctuation `|---|` separator would
+be eaten by the rubbish-line filter.
+
+**Limit (say it before asked):** this is **digital-only**. On a scan the table exists solely in the
+bitmap; Tesseract has no notion of cells, so scanned tables still come out as flattened text rows
+inside the question (and a faint photocopied grid can lose rows entirely — the 2079 EVA table kept
+only its header). Real scanned-table reconstruction needs image line-detection (OpenCV et al.) —
+deliberately out of scope; the review queue absorbs it.
 
 ### How questions are detected (splitting)
 
@@ -835,13 +942,16 @@ talks to Qdrant, like Redis."*
    semantic top-3 (similarity order). The `notes` array records which path ran. *Measured:* the
    same slot's grounding went 4,071 → 1,616 chars on the retrieval path, containing only the target
    unit's material.
-3. **Unit auto-suggest in the review queue** (suggest-only).
+3. **Unit auto-suggest + auto-assign in the review queue**.
    [`SimilarQuestionFinder`](../code/app/Services/Rag/SimilarQuestionFinder.php) annotates extracted
    candidates in one embedding pass: `attributes.similar` (nearest approved lookalike ≥ 0.90 —
    warning badge, human decides) and `attributes.suggested_units` (each unit's best chunk score,
-   floor 0.50, top 3 — clickable 💡 chips that pre-fill the form). *Seen live:* a SWOT/environmental-
-   scanning question suggested "Planning and Decision Making" at 0.751 without the word "planning"
-   appearing in it.
+   floor 0.50, top 3 — clickable 💡 chips that pre-fill the form). When the parser found no unit
+   heading and the top suggestion clears `RAG_UNIT_AUTO_ASSIGN_THRESHOLD` (0.50), the candidate is
+   pre-tagged with that unit as primary — badged `auto-assigned · N%`, still pending, still the
+   human's call at approval (an explicit human unit choice clears the badge). *Seen live:* a
+   SWOT/environmental-scanning question suggested "Planning and Decision Making" at 0.751 without
+   the word "planning" appearing in it.
 
 **Two postures, one deliberate asymmetry:** the *automated* pipeline (AI expansion, which over-asks)
 **auto-drops** duplicates — losing a candidate costs nothing; the *human* pipeline (review queue)
@@ -855,7 +965,9 @@ skips annotations, and **no upload, expansion, or approval ever fails because th
 **What RAG does NOT do (the boundary, same spirit as §6):**
 - ❌ It never selects paper questions — the greedy/backtracking engine is untouched; "no repeats"
   on papers stays by-id. RAG curates what enters the *bank* and the *prompt*, never the paper.
-- ❌ It never auto-assigns units — suggestions pre-fill, the human confirms (Post-M5 rule preserved).
+- ⚠️ It may *pre-tag* an untagged candidate's unit (top suggestion ≥ threshold) — but only as a
+  pending, badged, fully-editable default; approval remains the human's decision (this supersedes
+  the Post-M5 suggest-only rule).
 - ❌ It never blocks a human — review-queue flags are advisory; approval is never gated on a score.
 
 **The one-line defense:** *"The LLM may repeat itself; the bank won't — up to the similarity
@@ -1082,7 +1194,7 @@ Routes are behind `auth:sanctum` + `role:teacher`. Controllers add an ownership 
 `BankExpansionController` bakes the owner id into the batch **name** and re-checks it in `jobStatus`,
 so no extra table is needed to authorize the poll.
 
-### Database & extraction (4)
+### Database & extraction (5)
 
 **Q14. Why is repetition derived from `paper_questions` and not from `used_count`?**
 `paper_questions` is a precise per-paper snapshot — it records *which* questions were on *which*
@@ -1109,6 +1221,16 @@ inside marks tokens that already contain a digit. Units: a standalone `Unit 3` /
 `Group B` heading becomes a free-text `unit_hint`; Laravel resolves it against real units and leaves
 unresolvable ones unlinked for the admin. Everything lands `pending` — the review queue absorbs any
 wrong guess.
+
+**Q16c. How does OCR work, and when does it run?**
+Two text sources per page: pdfplumber reads the embedded text layer; pytesseract/Tesseract OCRs a
+300-DPI raster (pypdfium2) when the page is a scan. "Scan" is decided **per page** by two rules
+(§5.6): the text layer is near-empty (< 40 chars), **or embedded images cover ≥ 80 % of the page**
+— the second rule exists because photocopied TU papers carry a garbage text layer baked in by the
+scanner's own OCR ("PrinciJrles of Ulanagement") that passes any character count. Tesseract runs in
+`--psm 4` (single-column) so the question-number gutter isn't segmented off as a separate column,
+and the splitter accepts OCR-shaped numbering (`l,` `I.` `1 1.`) *only* on OCR pages. Benchmarked
+on 29 real TU papers: 241 → 368 candidates, 26/29 papers now yield their complete question set.
 
 ### AI / Python (3)
 
@@ -1224,6 +1346,8 @@ abstraction, the queue, the review queue).
 | 14 | Queue stack | Redis + Horizon; jobs `ProcessDocumentUpload`, `ExpandQuestionBank`, `SyncQuestionEmbedding`, `SyncSubjectChunks` (M6) |
 | 15 | Milestone status | M1–M6 (incl. M3.1, M4.1, Post-M5, Post-M5.1) all **Done**; 198 Laravel tests, 153 pytest green per the milestone log |
 | 16 | Past-paper marks signals (priority) | Brackets `[2+8]` → word "marks" → trailing paren `(2+8)` → section directive `[10×5=50]` per-question default (explicit wins; default resets each section; OCR `I→1` fold inside tokens) |
+| 16b | OCR stack + triggers | pdfplumber (text layer) → pypdfium2 raster @300 DPI → pytesseract/Tesseract `--psm 4` (single column). Per-page triggers: text < 40 chars **or** image coverage ≥ 0.8 (scanner's baked-in OCR layer is garbage). Loose numbering (`l,` `I.` `1 1.`) on OCR pages only. Benchmark: 29 TU papers, 241 → 368 candidates |
+| 16c | Tables in questions | Digital pages: `find_tables()` → markdown inside the question text (empty cells preserved); re-rendered as real tables by `QFQuestionText.vue` (UI), `QuestionTextSegments` (PDF `<table>` + DOCX `addTable()`). Scans: still flattened rows — Tesseract has no cell concept |
 | 17 | RAG stack (M6) | Embeddings: `nomic-embed-text` (768-dim) via Python `POST /embed`; vector DB: **Qdrant** (collections `questions` + `chunks`, cosine, point id = MySQL row id); Laravel-only access — an **index, not a database** |
 | 18 | RAG's three uses | ① Semantic dedup in AI expansion (auto-drop ≥ 0.90, `DuplicateDetector`) ② hybrid grounding (`GroundingBuilder`: full ≤ 6000 chars, else top-k chunks + semantic top-3 exemplars) ③ review-queue hints (`similar` flag + 💡 unit suggestions, floor 0.50, suggest-only) |
 | 19 | RAG folder + rebuild | `code/app/Services/Rag/`; rebuild everything: `artisan qforge:rag:reindex --fresh`; master switch `RAG_ENABLED` (fails open to M5 behavior) |

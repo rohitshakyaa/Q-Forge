@@ -102,6 +102,50 @@ class QuestionReviewApiTest extends TestCase
         $this->assertSame('approved', $question->refresh()->status);
     }
 
+    public function test_approving_with_an_explicit_unit_clears_the_auto_assign_flag(): void
+    {
+        $second = $this->subject->units()->create(['name' => 'Hashing', 'position' => 2]);
+        $question = $this->candidate([
+            'attributes' => ['unit_auto_assigned' => ['unit_id' => $this->unit->id, 'score' => 0.71]],
+        ]);
+
+        $this->postJson("/api/questions/{$question->id}/approve", ['unit_id' => $second->id])
+            ->assertOk();
+
+        // The human picked a unit — the machine-tag provenance must not survive.
+        $this->assertArrayNotHasKey('unit_auto_assigned', $question->refresh()->attributes);
+    }
+
+    public function test_approving_without_touching_the_unit_keeps_the_auto_assign_flag(): void
+    {
+        $question = $this->candidate([
+            'attributes' => ['unit_auto_assigned' => ['unit_id' => $this->unit->id, 'score' => 0.71]],
+        ]);
+
+        $this->postJson("/api/questions/{$question->id}/approve")->assertOk();
+
+        // Approved as-is: keep the provenance ("approved with an AI tag").
+        $this->assertSame(
+            ['unit_id' => $this->unit->id, 'score' => 0.71],
+            $question->refresh()->attributes['unit_auto_assigned'],
+        );
+    }
+
+    public function test_editing_the_unit_clears_the_auto_assign_flag(): void
+    {
+        $second = $this->subject->units()->create(['name' => 'Hashing', 'position' => 2]);
+        $question = $this->candidate([
+            'attributes' => ['unit_auto_assigned' => ['unit_id' => $this->unit->id, 'score' => 0.71]],
+        ]);
+
+        $this->putJson("/api/questions/{$question->id}", ['unit_id' => $second->id])
+            ->assertOk();
+
+        $question->refresh();
+        $this->assertSame($second->id, $question->unit_id);
+        $this->assertArrayNotHasKey('unit_auto_assigned', $question->attributes);
+    }
+
     public function test_a_candidate_without_marks_cannot_be_approved(): void
     {
         $question = $this->candidate(['marks' => null]);

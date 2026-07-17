@@ -7,6 +7,7 @@ import {
   QFButton,
   QFInput,
   QFPageHeader,
+  QFQuestionText,
   QFSelect,
 } from '../../components/qf';
 import { useCatalogStore } from '../../stores/catalog';
@@ -83,8 +84,9 @@ const beginEdit = (c: Candidate) => {
     text: c.text,
     marks: c.marks === null ? '' : String(c.marks),
     type: c.type,
-    // M6 Phase 3: an untagged candidate opens with the top RAG suggestion
-    // pre-selected — one click to confirm, still the human's call to change.
+    // M6 Phase 3: a candidate the backend could not auto-assign (suggestions all
+    // below threshold, or none) still opens with the top suggestion pre-selected
+    // — one click to confirm, still the human's call to change.
     unitId:
       c.unitId !== null
         ? String(c.unitId)
@@ -211,6 +213,15 @@ watch([filter, selectedSubject], load);
       Extracted questions land here as <strong>pending</strong> — none of them reach the generator
       until approved. A question with no unit or no marks cannot be approved: the parser could not
       read them off the paper, so assign them below.
+      <br />
+      <span style="color: var(--text3)">
+        ⚠ Extraction may be incomplete on scanned or photocopied papers. Those pages are read with
+        OCR (marked with the <strong>OCR</strong> badge), and OCR has limits: pen marks or smudges
+        over a question number can make that question vanish or merge into its neighbor, faint
+        print can garble words, and marks like <em>[2+8]</em> may be misread and left empty. Papers
+        that print no per-question marks at all are left blank on purpose — better missing than
+        wrong. Always skim the original PDF once and fix anything off via Edit before approving.
+      </span>
     </QFAIHint>
 
     <div v-if="actionError" style="margin-bottom: 14px; font-size: 13px; color: var(--danger)">
@@ -293,11 +304,16 @@ watch([filter, selectedSubject], load);
             <!-- view mode -->
             <div v-if="!isEditing(c.id)" style="display: flex; align-items: flex-start; gap: 12px">
               <div style="flex: 1; min-width: 0">
-                <p style="font-size: 13.5px; line-height: 1.6; margin-bottom: 8px; color: var(--text)">
-                  {{ c.text }}
-                </p>
+                <QFQuestionText
+                  :text="c.text"
+                  style="font-size: 13.5px; line-height: 1.6; margin-bottom: 8px; color: var(--text)"
+                />
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
                   <QFBadge variant="cyan">{{ group.unit.name }}</QFBadge>
+                  <!-- M6 Phase 3b: the unit came from RAG, not the paper — flag it until a human confirms -->
+                  <QFBadge v-if="c.autoAssigned && c.status === 'pending'" variant="ai" dot>
+                    auto-assigned · {{ Math.round(c.autoAssigned.score * 100) }}%
+                  </QFBadge>
                   <QFBadge v-if="c.marks !== null" variant="neutral">{{ c.marks }} marks</QFBadge>
                   <QFBadge v-else variant="warn">marks not detected</QFBadge>
                   <QFBadge variant="neutral">{{ c.type }}</QFBadge>
@@ -403,9 +419,10 @@ watch([filter, selectedSubject], load);
           >
             <div v-if="!isEditing(c.id)" style="display: flex; align-items: flex-start; gap: 12px">
               <div style="flex: 1; min-width: 0">
-                <p style="font-size: 13.5px; line-height: 1.6; margin-bottom: 8px; color: var(--text)">
-                  {{ c.text }}
-                </p>
+                <QFQuestionText
+                  :text="c.text"
+                  style="font-size: 13.5px; line-height: 1.6; margin-bottom: 8px; color: var(--text)"
+                />
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
                   <QFBadge variant="warn">no unit</QFBadge>
                   <QFBadge v-if="c.marks !== null" variant="neutral">{{ c.marks }} marks</QFBadge>
@@ -416,7 +433,7 @@ watch([filter, selectedSubject], load);
                   <QFBadge v-if="c.similar" variant="warn" dot>
                     ≈ Q#{{ c.similar.questionId }} ({{ Math.round(c.similar.score * 100) }}% similar)
                   </QFBadge>
-                  <!-- M6 Phase 3: RAG unit suggestions — click to apply, human confirms on approve -->
+                  <!-- M6 Phase 3: suggestions that fell below the auto-assign bar — click to apply, human confirms on approve -->
                   <template v-for="s in c.suggestedUnits" :key="s.unitId">
                     <button
                       v-if="unitName(s.unitId)"

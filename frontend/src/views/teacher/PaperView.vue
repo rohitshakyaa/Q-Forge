@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { QFBadge, QFButton, QFPageHeader } from '../../components/qf';
+import { QFBadge, QFButton, QFPageHeader, QFQuestionText } from '../../components/qf';
 import { usePapersStore } from '../../stores/papers';
 
 const route = useRoute();
@@ -135,7 +135,7 @@ const save = async () => {
                 "
               >{{ q.no }}.</span>
               <div style="flex: 1">
-                <p style="font-size: 14px; line-height: 1.7; color: var(--text)">{{ q.text }}</p>
+                <QFQuestionText :text="q.text" style="font-size: 14px; line-height: 1.7; color: var(--text)" />
                 <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap">
                   <span v-if="q.unit" class="qf-chip">{{ q.unit }}</span>
                   <QFBadge v-if="q.ai" variant="ai">✦ AI Generated</QFBadge>

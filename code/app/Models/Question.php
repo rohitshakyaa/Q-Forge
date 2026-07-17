@@ -78,6 +78,20 @@ class Question extends Model
     }
 
     /**
+     * Drop the RAG auto-assign provenance (`attributes.unit_auto_assigned`):
+     * the flag marks a machine-chosen unit, so it must not survive a human
+     * explicitly picking one. Mutates without saving — callers save.
+     */
+    public function clearUnitAutoAssigned(): void
+    {
+        $attrs = $this->getAttribute('attributes') ?? [];
+        if (array_key_exists('unit_auto_assigned', $attrs)) {
+            unset($attrs['unit_auto_assigned']);
+            $this->setAttribute('attributes', $attrs);
+        }
+    }
+
+    /**
      * Keep the pivot consistent with `unit_id`.
      *
      * With an explicit set, replace the links wholesale (callers validate that

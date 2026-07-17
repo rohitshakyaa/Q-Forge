@@ -3,6 +3,7 @@
 namespace App\Services\Rag;
 
 use App\Models\Question;
+use App\Models\Unit;
 use App\Services\PythonService;
 use Illuminate\Support\Facades\Log;
 
@@ -16,12 +17,17 @@ use Illuminate\Support\Facades\Log;
  *    searching the candidate's vector against the unit-content chunk index and
  *    aggregating the best score per unit.
  *
- * Both are flag-only by design. Unlike the AI expansion (an automated pipeline
- * that over-asks, where dropping is cheap), these candidates came from a real
- * exam paper a human chose to upload — so the reviewer sees the hints on the
- * card and decides. Similarity has false positives ("Define TCP" vs "Define
- * UDP" score high) and unit tags are human-assigned by project decision
- * (Post-M5): suggestions pre-fill, never auto-assign.
+ * The `similar` flag is flag-only by design: similarity has false positives
+ * ("Define TCP" vs "Define UDP" score high), so the reviewer sees the hint on
+ * the card and decides — never auto-drop.
+ *
+ * Unit suggestions go one step further (supersedes the Post-M5 "never
+ * auto-assign" rule): when the parser found no unit heading and the *top*
+ * suggestion clears `unit_auto_assign_threshold`, the candidate is pre-tagged
+ * with that unit as its primary — recorded in `attributes.unit_auto_assigned`
+ * so the review queue can badge it. Still pending, still fully editable; the
+ * human confirms (or re-tags) at approval, and an explicit human unit choice
+ * clears the provenance flag. A parser-resolved unit is never overridden.
  *
  * Runs once at extraction time; the review queue renders the stored verdicts
  * with zero extra lookups. Snapshots, not live views — `checked_at` says when.
@@ -78,6 +84,11 @@ class SimilarQuestionFinder
                         'rag_checked_at' => now()->toIso8601String(),
                     ]),
                 ]);
+
+                if (isset($hints['suggested_units'])) {
+                    $this->autoAssignFromSuggestions($question, $hints['suggested_units']);
+                }
+
                 $annotated++;
             }
 
@@ -89,6 +100,46 @@ class SimilarQuestionFinder
 
             return 0;
         }
+    }
+
+    /**
+     * Pre-tag an untagged candidate with its top suggested unit, when the
+     * score clears the auto-assign threshold. Shared by extraction-time
+     * annotation and the `qforge:rag:auto-assign-units` backfill so both
+     * apply one rule. Never overrides a parser-resolved unit.
+     *
+     * @param  array<int, array{unit_id: int, score: float}>  $suggestions  best-first
+     * @return bool  whether a unit was assigned
+     */
+    public function autoAssignFromSuggestions(Question $question, array $suggestions): bool
+    {
+        if ($question->unit_id !== null || $suggestions === []) {
+            return false;
+        }
+
+        $top = $suggestions[0];
+        if ((float) $top['score'] < (float) config('services.qdrant.unit_auto_assign_threshold')) {
+            return false;
+        }
+
+        // The chunk index can lag MySQL — only assign a unit that still exists
+        // under this candidate's subject.
+        $belongs = Unit::where('id', $top['unit_id'])
+            ->where('subject_id', $question->subject_id)
+            ->exists();
+        if (! $belongs) {
+            return false;
+        }
+
+        $question->update([
+            'unit_id' => $top['unit_id'],
+            'attributes' => array_merge($question->attributes ?? [], [
+                'unit_auto_assigned' => ['unit_id' => $top['unit_id'], 'score' => $top['score']],
+            ]),
+        ]);
+        $question->syncUnitLinks();
+
+        return true;
     }
 
     /**
