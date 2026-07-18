@@ -65,15 +65,35 @@ ensure_env() {
   fi
 }
 
-# --- wait until MySQL is accepting connections -------------------------------
+# --- wait until MySQL accepts a real TCP connection from the app -------------
+# Probe exactly the way `php artisan migrate` connects: over TCP, from the app
+# container, with the app's own credentials. A socket-only "ping" inside the db
+# container answers YES during MySQL's first-boot temp-server phase (networking
+# still disabled), which is why the old probe passed too early on a fresh volume
+# and migrate then hit "connection refused". This waits for the real thing.
 wait_for_db() {
-  step "Waiting for the database to be ready"
-  local user pass tries=60
-  user="$(grep -E '^MYSQL_USER=' "$PROJECT_ROOT/.env" | cut -d= -f2-)"
-  pass="$(grep -E '^MYSQL_USER_PASSWORD=' "$PROJECT_ROOT/.env" | cut -d= -f2-)"
+  step "Waiting for the database to accept TCP connections"
+  local host port user pass db tries=60
+  host="$(grep -E '^DB_HOST='     "$PROJECT_ROOT/code/.env" | cut -d= -f2-)"
+  port="$(grep -E '^DB_PORT='     "$PROJECT_ROOT/code/.env" | cut -d= -f2-)"
+  user="$(grep -E '^DB_USERNAME=' "$PROJECT_ROOT/code/.env" | cut -d= -f2-)"
+  pass="$(grep -E '^DB_PASSWORD=' "$PROJECT_ROOT/code/.env" | cut -d= -f2-)"
+  db="$(grep -E '^DB_DATABASE='   "$PROJECT_ROOT/code/.env" | cut -d= -f2-)"
   for ((i = 1; i <= tries; i++)); do
-    if dc exec -T "$DB_SERVICE" mysqladmin ping -h localhost -u"$user" -p"$pass" --silent >/dev/null 2>&1; then
-      ok "Database is up"
+    if dc exec -T \
+         -e PROBE_HOST="$host" -e PROBE_PORT="${port:-3306}" -e PROBE_DB="$db" \
+         -e PROBE_USER="$user" -e PROBE_PASS="$pass" \
+         "$APP_SERVICE" php -r '
+           try {
+             new PDO(
+               "mysql:host=".getenv("PROBE_HOST").";port=".getenv("PROBE_PORT").";dbname=".getenv("PROBE_DB"),
+               getenv("PROBE_USER"), getenv("PROBE_PASS"),
+               [PDO::ATTR_TIMEOUT => 2]
+             );
+           } catch (Throwable $e) { exit(1); }
+         ' >/dev/null 2>&1; then
+      printf '\n'
+      ok "Database is up (TCP + credentials OK)"
       return 0
     fi
     printf '\r    waiting… (%d/%d)' "$i" "$tries"
