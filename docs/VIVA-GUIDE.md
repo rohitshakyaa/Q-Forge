@@ -78,23 +78,31 @@ and method names are real.
    is only involved if the bank can't satisfy the blueprint *and* the teacher then clicks "Expand
    bank with AI" (§6). So the normal generate path is pure Laravel + MySQL.
 
-6. **Persist (on success).** If `result->satisfiable` is true, `PaperController::persist()` writes a
-   `papers` row (`status=draft`) and one `paper_questions` row per chosen question inside a DB
-   transaction, then increments `used_count` on the chosen questions.
+6. **Generate is a PREVIEW — nothing persists** (Post-M6). If `result->satisfiable` is true the
+   controller returns the paper with **`id: null`** plus the run's `seed` and `blueprint_id`. No
+   `papers` row, no `paper_questions`, no `used_count` bump, no `last_used_at` — so regenerating to
+   compare variants never clutters history or skews usage stats.
 
-7. **Response → Frontend.** The controller returns JSON: either
-   `{ satisfiable:true, paper, constraint_results }`, or on failure
-   `{ satisfiable:false, expandable, shortfall_reason, paper (partial), missing_slots, constraint_results }`.
-   The `papers.ts` store renders the paper, the green/red constraint checklist, and — on failure —
-   the shortfall panel with an "Expand bank with AI" button.
+7. **Save is a second, explicit step.** `POST /papers` (`PaperController::store`) takes back
+   `{ blueprint_id, seed, name? }` and — because the engine is deterministic given its seed —
+   **re-generates** and *then* persists: a `papers` row (`status=saved`) + one `paper_questions` row
+   per selection, increments `used_count` on the chosen questions, and stamps the blueprint's
+   `last_used_at`. If the bank changed so the seed no longer yields a full paper, Save returns **422**
+   ("regenerate"). Export later flips `status` to `exported`. Lifecycle: **preview → saved → exported**
+   (no auto-`draft`).
 
-> **Discrepancy to know (code vs. comment):** the docblock above `PaperController::generate` says
-> `used_count` is *not* incremented at generate time ("deferred to Save in M3"). The **actual code**
-> in `persist()` *does* `Question::whereIn('id', $pickedIds)->increment('used_count')`. The code is
-> authoritative and matches the M3 milestone note ("`used_count` now incremented on generate-persist");
-> the docblock is a stale M2-era comment. If an examiner asks, say: *"the comment is out of date — we
-> increment on persist; repetition control itself doesn't rely on that column anyway, it's derived
-> from `paper_questions`."*
+8. **Response → Frontend.** Generate returns either `{ satisfiable:true, seed, blueprint_id, paper }`
+   or `{ satisfiable:false, expandable, shortfall_reason, paper (partial), missing_slots, ... }`. The
+   `papers.ts` store holds the preview in `current` (unsaved), renders the constraint checklist, and —
+   on failure — the shortfall panel with an "Expand bank with AI" button. The teacher reviews the
+   preview and clicks **Save Paper** to commit it.
+
+> **Why preview-first?** Before Post-M6, `generate` auto-persisted a `draft` that showed up in
+> History immediately, which made the "Save" button look redundant (it only flipped `draft→saved`).
+> Now Generate is a pure preview and Save is what commits — so `used_count`/`last_used_at` and the
+> last-N repetition window only ever count papers a teacher actually kept, which is the correct
+> semantics. Repetition control itself reads `paper_questions`, so it's automatically limited to
+> saved papers now.
 
 ### Sequence diagram
 
@@ -131,9 +139,14 @@ sequenceDiagram
         end
     end
     alt satisfiable
-        API->>DB: persist paper + paper_questions, increment used_count
-        API-->>FE: 200 { satisfiable:true, paper, constraint_results }
-        FE-->>T: Render paper + all-green checklist
+        API-->>FE: 200 PREVIEW { satisfiable:true, seed, blueprint_id, paper(id=null) }
+        FE-->>T: Render preview + all-green checklist (not saved yet)
+        opt Teacher clicks "Save Paper"
+            FE->>API: POST /papers { blueprint_id, seed, name? }
+            API->>PG: generate(blueprint, seed) again (deterministic)
+            API->>DB: persist paper(status=saved) + paper_questions,<br/>bump used_count, stamp last_used_at
+            API-->>FE: 201 { paper }
+        end
     else infeasible
         API-->>FE: 200 { satisfiable:false, missing_slots, expandable, ... }
         FE-->>T: Show shortfall + "Expand bank with AI"
@@ -210,25 +223,49 @@ so downstream coverage checks don't N+1.
 **Two things worth saying out loud in a viva:**
 1. `status = 'approved'` is why AI-generated questions are stored as `approved` (not `pending`) — a
    pending question is *invisible* here, so the AI top-up would silently fail (see §6).
-2. The `whereNotIn` (in-paper) and the last-N closure (cross-paper) are the two repetition guards.
-   The last-N rule is injected as a closure so it plugs in without changing this class — it's a
-   no-op when the blueprint sets `lastNPapers <= 0`.
+2. Repetition guards: the `whereNotIn` (in-paper) plus **two** injected cross-paper closures the
+   generator composes into one — **last-N papers** (`lastNPapers`) and, post-M6, **last-N exam-years**
+   (`excludeExamYearsBack`: drop questions whose `attributes.exam_year` is in the N years before the
+   current one — "don't reuse last year's exam questions"; year-less questions stay eligible). Both
+   are injected as closures so they plug in without changing this class, and each is a no-op when its
+   blueprint value is `<= 0`.
 
 ### Stage 3 — Greedy select (`GreedySelector`)
 
 **Problem:** from a legal pool, pick one.
 
 **"Greedy" defined:** a greedy algorithm makes the choice that looks best *right now*, without
-looking ahead. Here "best" is a two-level rank (post-M5.1): **coverage first** — a question tagged
+looking ahead. Here "best" is a three-level rank: **coverage first** (post-M5.1) — a question tagged
 with a *still-uncovered allowed unit* beats one that isn't — then **least-recently-used (LRU)**:
-lowest `used_count`, ties broken by `id` (so it's deterministic). *(LRU = the question used the
-fewest times gets picked first, which spreads usage across the bank over time.)*
+lowest `used_count` — then a **seeded tie-break** (post-M6, `Support/TieBreaker`). *(LRU = the
+question used the fewest times gets picked first, which spreads usage across the bank over time.)*
+
+**The seeded tie-break (post-M6 — why papers stopped being identical):** the final tie used to be
+ascending `id`, which made a blueprint + bank produce *one frozen paper* — the same for every
+teacher and on every "regenerate". `TieBreaker::key($seed, $id)` replaces that last step: a `null`
+seed returns the id itself (the original order, so the deterministic engine tests need no seed); any
+integer seed returns `crc32("$seed:$id")` — a stable pseudo-random key. The seed only reorders
+questions the rank *already treats as equal* (same coverage tier, same `used_count`), so coverage +
+LRU rotation are untouched. The controller draws a fresh `random_int` seed per request and echoes it
+in the response, so the same seed reproduces a paper exactly (test-safe, debuggable) while a new one
+varies it.
+
+**The within-paper duplicate guard (post-M6 — no two questions that *mean* the same):** id-only
+de-duplication can't tell "Define a binary tree" from "What is a binary tree?" — different rows,
+same question. `PaperGenerator::greedyFill` now takes an injected `SimilarityGuard`
+([`Contracts/SimilarityGuard`](../code/app/Services/PaperGeneration/Contracts/SimilarityGuard.php))
+and, before each pick, *prefers* candidates that aren't near-duplicates of questions already placed
+(cosine ≥ the shared `RAG_DUPLICATE_THRESHOLD` over the Qdrant question vectors — §6.5). It is
+**soft**: if dropping look-alikes would empty the pool it keeps the full pool, so dedup can never
+cause a shortfall; and it **fails open** — the default is the no-op `NullSimilarityGuard`, and the
+real [`VectorSimilarityGuard`](../code/app/Services/PaperGeneration/VectorSimilarityGuard.php)
+degrades to "nothing is similar" when RAG is off or Qdrant is down.
 
 **Inputs / outputs:** input is the candidate `Collection` plus the set of uncovered allowed unit
-ids (threaded through the slot loop by `PaperGenerator::greedyFill`, which also rejects candidates
-that would bust a per-unit cap before the pick); output is one `Question` (or `null` if the pool is
-empty). With no unit rules the rank degenerates to the original pure LRU — byte-identical
-behaviour.
+ids and the run seed (threaded through the slot loop by `PaperGenerator::greedyFill`, which also
+rejects candidates that would bust a per-unit cap and, via the guard, prefers dissimilar ones);
+output is one `Question` (or `null` if the pool is empty). With no unit rules and no seed the rank
+degenerates to the original pure LRU — byte-identical behaviour.
 
 **The evolution to narrate (it's a good story):** in M2 the greedy was *deliberately*
 unit-agnostic — coverage was a validated constraint only, so a naive pass could starve a unit and
@@ -259,9 +296,13 @@ tree of possibilities depth-first but prunes as soon as a branch can't work.
   every allowed unit is capped and the caps sum below the slot count. No assignment can exist, so
   running the search would only burn the 50k-iteration budget.
 - A bounded **depth-first search** (`search()`), one recursion level per slot.
-- At each slot it orders candidates **uncovered-unit-first**, then by `used_count`, then `id` — i.e.
-  it prefers a question whose unit isn't covered yet, to drive toward full coverage. A multi-unit
-  question ranks uncovered-first when *any* of its tagged units is still uncovered.
+- At each slot it orders candidates **uncovered-unit-first**, then by `used_count`, then the same
+  **seeded tie-break** as the greedy pass (id order when unseeded) — i.e. it prefers a question whose
+  unit isn't covered yet, to drive toward full coverage. A multi-unit question ranks uncovered-first
+  when *any* of its tagged units is still uncovered. (The within-paper similarity guard is
+  deliberately **not** applied here — similarity is a soft preference, not a blueprint constraint, so
+  enforcing it in the repair pass could turn a satisfiable paper infeasible. The rare backtracking
+  pass optimises for a *valid* assignment above all.)
 - It skips any question already used (distinctness) and **prunes** any candidate that would push a
   tagged capped unit past its maximum on this path (a multi-unit question counts against *every*
   tagged capped unit).
@@ -302,7 +343,7 @@ This is a classic viva question — here is the defense:
 
 | Alternative | Why not |
 |---|---|
-| **Pure random** | Not reproducible, can't guarantee constraints, can't explain a failure. QForge must be defensible and deterministic. |
+| **Pure random** | Can't guarantee constraints, can't explain a failure. QForge must be defensible. *Note the distinction from the post-M6 seeded tie-break:* that isn't pure randomness — it's a deterministic function of an explicit, echoed-back seed, so a paper is always reproducible (same seed ⇒ same paper) and constraints are still enforced by the same rules. Variety without giving up determinism-by-inspection. |
 | **Brute force** (try every combination) | Combinatorial explosion — with dozens of questions per slot it's astronomically large. Wasteful when a greedy pass usually succeeds outright. |
 | **ILP / constraint solver** (e.g. an external LP/CP solver) | Powerful, but adds a heavy external dependency, is a "black box" that's hard to explain to examiners, and is overkill for this scale. A locked design decision (PLAN.md) was *"from scratch, no external solver."* |
 | **Greedy + backtracking (chosen)** | Greedy is fast and solves the common case in one linear pass. Backtracking is a *correctness safety net*: it guarantees that if a valid paper exists (within the iteration cap), it will be found. Deterministic, explainable, self-contained, unit-testable. |
@@ -960,7 +1001,7 @@ talks to Qdrant, like Redis."*
   ~1600-char paragraph packing, runt merging, context-path prefixes), replace `content_chunks`
   rows, batch-embed, upsert.
 
-**The three consumers:**
+**The four consumers:**
 
 1. **Semantic dedup in AI expansion** (auto-drop).
    [`DuplicateDetector`](../code/app/Services/Rag/DuplicateDetector.php) inside
@@ -987,6 +1028,15 @@ talks to Qdrant, like Redis."*
    human's call at approval (an explicit human unit choice clears the badge). *Seen live:* a
    SWOT/environmental-scanning question suggested "Planning and Decision Making" at 0.751 without
    the word "planning" appearing in it.
+4. **Within-paper duplicate guard in the generator** (post-M6 — soft preference).
+   [`VectorSimilarityGuard`](../code/app/Services/PaperGeneration/VectorSimilarityGuard.php) lets the
+   greedy pass *prefer* candidates that aren't near-duplicates (cosine ≥ `RAG_DUPLICATE_THRESHOLD`
+   over the `questions` vectors it fetches by id — a new `QdrantClient::retrieve`) of questions
+   already placed on **this** paper. Unlike the other three, this one touches paper selection — but
+   only as a *tie-breaking preference*: it never empties a pool (so it can't cause a shortfall) and
+   fails open to the no-op `NullSimilarityGuard` when RAG is down. This is the boundary from §6
+   softened by exactly one notch, on purpose: RAG may now *nudge* which of two equally-valid
+   questions lands, never *whether* the paper is valid — the deterministic rules still decide that.
 
 **Two postures, one deliberate asymmetry:** the *automated* pipeline (AI expansion, which over-asks)
 **auto-drops** duplicates — losing a candidate costs nothing; the *human* pipeline (review queue)
@@ -998,24 +1048,29 @@ seam: if Python or Qdrant is down, expansion degrades to exact-text dedup + M5 g
 skips annotations, and **no upload, expansion, or approval ever fails because the index is sick**.
 
 **What RAG does NOT do (the boundary, same spirit as §6):**
-- ❌ It never selects paper questions — the greedy/backtracking engine is untouched; "no repeats"
-  on papers stays by-id. RAG curates what enters the *bank* and the *prompt*, never the paper.
+- ⚠️ It never *decides* a paper — the greedy/backtracking engine still makes every selection, and no
+  constraint (coverage, caps, counts, marks) is ever a similarity score. Post-M6 it may *nudge* one
+  choice: the within-paper guard prefers a dissimilar candidate among equally-ranked ones (consumer
+  4), a soft, pool-non-emptying, fail-open preference. So "no *near*-repeats on a paper" is now a
+  best-effort RAG preference; "no *exact* repeats" stays a hard by-id rule.
 - ⚠️ It may *pre-tag* an untagged candidate's unit (top suggestion ≥ threshold) — but only as a
   pending, badged, fully-editable default; approval remains the human's decision (this supersedes
   the Post-M5 suggest-only rule).
 - ❌ It never blocks a human — review-queue flags are advisory; approval is never gated on a score.
 
-**The one-line defense:** *"The LLM may repeat itself; the bank won't — up to the similarity
-threshold, whenever the index is healthy. And retrieval feeds the prompt and the bank, never the
-paper: the deterministic algorithm still makes every selection decision."*
+**The one-line defense:** *"The LLM may repeat itself; the bank won't, and neither does a single
+paper — up to the similarity threshold, whenever the index is healthy. Retrieval feeds the prompt
+and the bank, and at most *nudges* the paper (a soft, fail-open dedup preference); the deterministic
+algorithm still makes every actual selection decision and enforces every constraint."*
 
 ---
 
 ## 7. Strong points to emphasize (spoken talking points)
 
 1. *"The core is a **deterministic, explainable algorithm** I wrote from scratch — no external
-   solver. The same blueprint and bank always produce the same paper, and for any result I can show a
-   per-constraint pass/fail checklist."*
+   solver. It's seed-parameterised (post-M6): the same blueprint, bank **and seed** always produce
+   the same paper — so any result is reproducible and I can show a per-constraint pass/fail checklist
+   — while a fresh seed per run gives teachers a different valid paper instead of one frozen output."*
 2. *"It's a **hybrid greedy + backtracking** design: greedy handles the common case in a fast linear
    pass, and backtracking is a **correctness safety net** that guarantees a valid paper is found if
    one exists within the iteration cap."*
@@ -1133,8 +1188,11 @@ framing.
 **Q1. Walk me through what happens from clicking Generate to seeing a paper.**
 The frontend `papers.ts` store POSTs `/papers/generate` to `PaperController::generate`, which checks
 ownership and calls `PaperGenerator::generate`. That compiles the blueprint into slots, runs a greedy
-LRU fill, validates; if invalid it runs the backtracking resolver; on success the controller persists
-a draft paper and returns it with a constraint checklist. See §2.
+LRU fill, validates; if invalid it runs the backtracking resolver. On success the controller returns
+the paper as an **unsaved preview** (`id: null`) plus its `seed` and a constraint checklist — nothing
+is persisted. The teacher reviews it and clicks **Save Paper** (`POST /papers`), which re-generates
+deterministically from the seed and *then* writes the `papers` row (`status=saved`), bumping
+`used_count`. See §2.
 
 **Q2. Why greedy AND backtracking — isn't one enough?**
 Greedy alone is fast but myopic: even the coverage-aware rank (post-M5.1) picks per-slot without
@@ -1176,11 +1234,15 @@ server-set, scarcest-first `unitIds[]` so the M5 AI job knows exactly which unit
 question must target (`unit_id` = the first, kept for back-compat).
 
 **Q8. Is the algorithm deterministic? Prove it.**
-Yes. Every ordering has a deterministic tie-break by `id`: `CandidateFilter` orders by
-`used_count, id`; `GreedySelector` and `BacktrackingResolver` both sort by
-`[uncovered-rank, used_count, id]`. No randomness anywhere — same inputs → same paper. This is
+Yes — **deterministic given its seed** (post-M6). Every ordering is a hard lexicographic rank:
+`CandidateFilter` orders by `used_count, id`; `GreedySelector` and `BacktrackingResolver` both sort
+by `[uncovered-rank, used_count, TieBreaker::key(seed, id)]`. The only "randomness" is the seed
+itself, which the controller picks per run **and echoes back** — pass the same seed and you get a
+byte-identical paper (a `null` seed reproduces the original pure-`id` order, which is how the unit
+tests pin it). So it's *reproducible*, not random: same inputs **+ same seed** → same paper. This is
 also *why* the doc-proposed weighted scoring formula was rejected: hard lexicographic ranks stay
-provably deterministic and explainable, with no magic weights to tune or defend.
+provably explainable, with no magic weights to tune or defend. (The seed reorders only questions the
+rank already ties; it never overrides coverage, caps, counts, or marks.)
 
 **Q8b. Your blueprint mandates 12 units but has only 10 questions. How can that ever be satisfied?**
 With **multi-unit questions** (post-M5): a question tagged Units 3+4 covers *both* under union
@@ -1321,13 +1383,18 @@ approved only*" in one call) and scale headroom, at the cost of one container. T
 makes it safe: **Qdrant is an index, not a database** — every vector derives from a MySQL row, and
 `artisan qforge:rag:reindex --fresh` rebuilds it from scratch, so it can never hold hostage data.
 
-**Q19c. Why doesn't the paper generator use similarity — two similar questions could land on one paper?**
-Deliberate layering: RAG is **bank hygiene** (AI near-dupes never enter; extracted lookalikes are
-flagged for the reviewer), and the paper generator stays deterministic with by-id repeat checks. If
-duplicates can't get *into* the bank, the algorithm doesn't need to dodge them — fix the disease,
-not the symptom. Two *human-approved* similar questions can still co-occur; a paper-level semantic
-diversity constraint is cheap future work (the vectors already exist) but it would change the
-centerpiece algorithm's semantics, so it's out of scope by choice.
+**Q19c. Does the paper generator use similarity — could two similar questions land on one paper?**
+Two layers. First, **bank hygiene**: AI near-dupes never enter (auto-drop) and extracted lookalikes
+are flagged for the reviewer — fix the disease, not the symptom. But two *human-approved* similar
+questions can still co-exist in the bank, so (post-M6) the generator adds a second layer: a
+**within-paper duplicate guard** (`SimilarityGuard`) that makes the greedy pass *prefer* a candidate
+that isn't a near-duplicate (cosine ≥ 0.90 over the question vectors) of one already placed on this
+paper. Crucially it's **soft, not a constraint**: it never empties a pool (so it can't cause a
+shortfall), it's applied only in the greedy pass (never in backtracking, so it can't turn a
+satisfiable paper infeasible), and it **fails open** to a no-op when RAG is down. So the answer is
+"yes, it now avoids them when it can — as a preference — while the centerpiece algorithm's
+correctness semantics stay exactly as before." Hard by-id de-dup still guarantees no *exact* repeat
+regardless.
 
 **Q19d. The LLM will still generate duplicates though — right?**
 Yes — the model has no memory of the bank; we filter *after* generation, not prevent. Two layers in
@@ -1370,7 +1437,7 @@ abstraction, the queue, the review queue).
 | 2 | Orchestrator / facade class | `PaperGenerator` (`generate()` returns a `GenerationResult`) |
 | 3 | The five stages | Compile → Filter → Greedy select → Backtrack → Validate |
 | 4 | Five stage classes | `BlueprintCompiler`, `CandidateFilter`, `GreedySelector`, `BacktrackingResolver`, `ConstraintValidator` |
-| 5 | Greedy policy | Coverage-first (uncovered-unit rank), then LRU: lowest `used_count`, tie-break `id` (deterministic; pure LRU when no unit rules) |
+| 5 | Greedy policy | Coverage-first (uncovered-unit rank), then LRU (lowest `used_count`), then **seeded tie-break** (`TieBreaker`: `id` when unseeded, per-seed shuffle otherwise). Plus a soft, fail-open **within-paper similarity guard** — prefers non-near-duplicate candidates. Deterministic given the seed; pure LRU when no unit rules and no seed |
 | 6 | Backtracking type + cap | Bounded depth-first search, `MAX_ITERATIONS = 50000`, uncovered-unit-first ordering, cap-busting candidates pruned; skipped entirely when structurally infeasible |
 | 7 | Hard constraints | approved status, subject, type, marks, allowed unit (any tag), unit coverage (union), unit maximums, no repeats |
 | 7b | Structural infeasibility | `units > 2×slots` (AI spans ≤ 2 units) or every unit capped with `Σcaps < slots` — refused with a plain-language reason, AI expansion blocked |
@@ -1382,14 +1449,14 @@ abstraction, the queue, the review queue).
 | 12 | AI model + provider | Ollama `qwen2.5:3b-instruct` via `LLMProvider` (`OllamaProvider` + `StubProvider`) |
 | 13 | What AI decides / doesn't | Decides: question *text*. Doesn't: type, marks, units (told in the prompt, never parsed back), selection, or DB writes |
 | 14 | Queue stack | Redis + Horizon; jobs `ProcessDocumentUpload`, `ExpandQuestionBank`, `SyncQuestionEmbedding`, `SyncSubjectChunks` (M6) |
-| 15 | Milestone status | M1–M6 (incl. M3.1, M4.1, Post-M5, Post-M5.1) all **Done**; 198 Laravel tests, 153 pytest green per the milestone log |
+| 15 | Milestone status | M1–M6 (incl. M3.1, M4.1, Post-M5, Post-M5.1) all **Done**, plus post-M6 seeded variation + within-paper dedup; 220 Laravel tests, 153 pytest green per the milestone log |
 | 16 | Past-paper marks signals (priority) | Brackets `[2+8]` → word "marks" → trailing paren `(2+8)` → section directive `[10×5=50]` per-question default (explicit wins; default resets each section; OCR `I→1` fold inside tokens) |
 | 16b | OCR stack + triggers | pdfplumber (text layer) → pypdfium2 raster @300 DPI → pytesseract/Tesseract `--psm 4` (single column). Per-page triggers: text < 40 chars **or** image coverage ≥ 0.8 (scanner's baked-in OCR layer is garbage). Loose numbering (`l,` `I.` `1 1.`, stray pen-tick glyph before the number, bare first `1`) on OCR pages only. Benchmarks: 29 TU papers 241 → 368 candidates (26/29 complete); 27 6th-sem papers 288 candidates (22/27 complete) |
 | 16c | Tables in questions | Digital pages: `find_tables()` → markdown inside the question text (empty cells preserved); re-rendered as real tables by `QFQuestionText.vue` (UI), `QuestionTextSegments` (PDF `<table>` + DOCX `addTable()`). Scans: still flattened rows — Tesseract has no cell concept |
 | 17 | RAG stack (M6) | Embeddings: `nomic-embed-text` (768-dim) via Python `POST /embed`; vector DB: **Qdrant** (collections `questions` + `chunks`, cosine, point id = MySQL row id); Laravel-only access — an **index, not a database** |
-| 18 | RAG's three uses | ① Semantic dedup in AI expansion (auto-drop ≥ 0.90, `DuplicateDetector`) ② hybrid grounding (`GroundingBuilder`: full ≤ 6000 chars, else top-k chunks + semantic top-3 exemplars) ③ review-queue hints (`similar` flag + 💡 unit suggestions, floor 0.50, suggest-only) |
+| 18 | RAG's four uses | ① Semantic dedup in AI expansion (auto-drop ≥ 0.90, `DuplicateDetector`) ② hybrid grounding (`GroundingBuilder`: full ≤ 6000 chars, else top-k chunks + semantic top-3 exemplars) ③ review-queue hints (`similar` flag + 💡 unit suggestions, floor 0.50, suggest-only) ④ within-paper duplicate guard in the generator (`VectorSimilarityGuard`, soft/fail-open, post-M6) |
 | 19 | RAG folder + rebuild | `code/app/Services/Rag/`; rebuild everything: `artisan qforge:rag:reindex --fresh`; master switch `RAG_ENABLED` (fails open to M5 behavior) |
-| 20 | RAG boundary (one line) | *"The LLM may repeat itself; the bank won't. Retrieval feeds the prompt and the bank — never the paper; selection stays deterministic."* |
+| 20 | RAG boundary (one line) | *"The LLM may repeat itself; the bank won't, and neither does a single paper. Retrieval feeds the prompt and the bank, and at most *nudges* the paper (a soft, fail-open dedup preference) — selection and every constraint stay with the deterministic algorithm."* |
 | 21 | RAG live evidence | Model repeated its own questions at **0.9979 / 0.9788** → both auto-dropped (worker log); paraphrase of a bank question scored **0.989** vs next-best 0.765; SWOT question → "Planning and Decision Making" suggested at **0.751** |
 
 ---

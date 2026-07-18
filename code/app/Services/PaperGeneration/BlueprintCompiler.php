@@ -32,6 +32,7 @@ class BlueprintCompiler
         $allowedUnitIds = $this->resolveAllowedUnits($definition['unitRules'] ?? [], $unitsByName->all());
         $unitCaps = $this->resolveCaps($definition['unitAllocations'] ?? [], $unitsByName->all(), $allowedUnitIds);
         $lastNPapers = (int) ($definition['exclusionRules']['lastNPapers'] ?? 0);
+        $excludeExamYearsBack = (int) ($definition['exclusionRules']['excludeExamYearsBack'] ?? 0);
 
         return new CompiledBlueprint(
             subjectId: (int) $blueprint->subject_id,
@@ -41,6 +42,7 @@ class BlueprintCompiler
             unitNames: $unitNames,
             unitCaps: $unitCaps,
             lastNPapers: $lastNPapers,
+            excludeExamYearsBack: $excludeExamYearsBack,
         );
     }
 

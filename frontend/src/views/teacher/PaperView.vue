@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { QFBadge, QFButton, QFPageHeader, QFQuestionText } from '../../components/qf';
 import { usePapersStore } from '../../stores/papers';
@@ -8,22 +8,23 @@ const route = useRoute();
 const router = useRouter();
 const store = usePapersStore();
 
-const paperId = Number(route.params.id);
-const paper = computed(() => store.getById(paperId));
-const saving = ref(false);
+// Preview mode = the unsaved generate result (store.current, no id yet). The
+// id route is a persisted paper loaded authoritatively from the server.
+const isPreview = computed(() => route.name === 'teacher-paper-preview');
+const paperId = computed(() => Number(route.params.id));
+const paper = computed(() => (isPreview.value ? store.current : store.getById(paperId.value)));
 
-// Always load authoritatively on mount so direct links, refreshes, and History
-// navigation work (and we pick up status/export_count changes after export).
-onMounted(() => store.fetchById(paperId));
+onMounted(() => {
+  // A preview already lives in the store; only saved papers are fetched by id
+  // (so direct links, refreshes, and post-export status changes work).
+  if (!isPreview.value) store.fetchById(paperId.value);
+});
 
-const save = async () => {
-  if (paper.value?.id == null) return;
-  saving.value = true;
-  try {
-    await store.update(paper.value.id, { status: 'saved' });
-  } finally {
-    saving.value = false;
-  }
+// Save the preview → the server persists it and returns its new id; jump to the
+// real paper page so Export becomes available and a refresh keeps it.
+const savePreview = async () => {
+  const id = await store.savePaper();
+  if (id !== null) router.replace(`/teacher/paper/${id}`);
 };
 </script>
 
@@ -31,18 +32,30 @@ const save = async () => {
   <div v-if="paper" class="qf-content qf-anim-in">
     <QFPageHeader
       :title="paper.name"
-      :subtitle="`${paper.subject} · ${paper.marks} marks · ${paper.duration} minutes · Generated ${paper.date}`"
+      :subtitle="isPreview
+        ? `${paper.subject} · ${paper.marks} marks · ${paper.duration} minutes · Preview — not saved yet`
+        : `${paper.subject} · ${paper.marks} marks · ${paper.duration} minutes · Generated ${paper.date}`"
       :breadcrumbs="[
         { label: 'Dashboard', to: '/teacher' },
         { label: 'Generate', to: '/teacher/generate' },
-        { label: paper.name },
+        { label: isPreview ? 'Preview' : paper.name },
       ]"
     >
       <template #actions>
-        <QFButton variant="secondary" size="sm" :disabled="saving || paper.status === 'saved'" @click="save">
-          {{ paper.status === 'saved' ? 'Saved' : saving ? 'Saving…' : 'Save' }}
-        </QFButton>
-        <QFButton variant="primary" size="sm" @click="router.push(`/teacher/export/${paper.id}`)">
+        <template v-if="isPreview">
+          <QFButton variant="secondary" size="sm" @click="router.push('/teacher/generate')">
+            ← Discard
+          </QFButton>
+          <QFButton variant="primary" size="sm" :disabled="store.saving" @click="savePreview">
+            {{ store.saving ? 'Saving…' : 'Save Paper' }}
+          </QFButton>
+        </template>
+        <QFButton
+          v-else
+          variant="primary"
+          size="sm"
+          @click="router.push(`/teacher/export/${paper.id}`)"
+        >
           Export →
         </QFButton>
       </template>
@@ -155,5 +168,13 @@ const save = async () => {
         </div>
       </div>
     </div>
+  </div>
+
+  <div v-else-if="isPreview" class="qf-content qf-anim-in" style="text-align: center; padding: 64px 0">
+    <div style="font-size: 15px; color: var(--text2); margin-bottom: 6px">This preview is no longer available.</div>
+    <div style="font-size: 13px; color: var(--text3); margin-bottom: 18px">
+      Previews aren't saved until you click “Save Paper”. Generate one to continue.
+    </div>
+    <QFButton variant="primary" size="sm" @click="router.push('/teacher/generate')">Generate a paper →</QFButton>
   </div>
 </template>

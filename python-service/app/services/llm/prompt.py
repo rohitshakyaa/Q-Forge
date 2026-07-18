@@ -32,12 +32,18 @@ def build_prompt(
             f'and "{units[1]}". A question answerable using only one of them is invalid.'
         )
 
+    # Ordering matters for KV-cache reuse: everything that is identical across a
+    # slot's retry rounds (role, the large syllabus block, type/marks/shape) comes
+    # first, and the ONE value that changes each round — `count` — is isolated on
+    # the final line. That keeps the whole prefix byte-stable between rounds, so the
+    # local model can reuse the syllabus prefill instead of re-encoding it each time.
     return (
-        "You are an examiner authoring questions for a university course. Using ONLY the "
-        "syllabus context provided, and nothing outside it, write "
-        f"{count} distinct {kind} exam questions worth {marks} marks each.{extra}\n"
+        "You are an examiner authoring questions for a university course. "
+        "Use ONLY the syllabus context provided, and nothing outside it.\n\n"
+        "=== SYLLABUS CONTEXT ===\n"
+        f"{grounding.strip()}\n\n"
+        f"Write distinct {kind} exam questions worth {marks} marks each.{extra}\n"
         'Respond with a single JSON object of the form '
         f'{{"questions": [{item_shape}, ...]}} and no prose.\n\n'
-        "=== SYLLABUS CONTEXT ===\n"
-        f"{grounding.strip()}\n"
+        f"Number of questions to write: {count}\n"
     )

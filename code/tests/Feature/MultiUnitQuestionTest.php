@@ -21,6 +21,15 @@ class MultiUnitQuestionTest extends TestCase
 {
     use RefreshDatabase;
 
+    /** Generate a preview then Save it (generate no longer persists on its own). */
+    private function generateAndSave(int $blueprintId): void
+    {
+        $seed = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprintId])
+            ->assertOk()->assertJsonPath('satisfiable', true)->json('seed');
+        $this->postJson('/api/papers', ['blueprint_id' => $blueprintId, 'seed' => $seed])
+            ->assertCreated();
+    }
+
     /** @return array{Subject, Unit, Unit, Unit} */
     private function subjectWithThreeUnits(): array
     {
@@ -207,9 +216,7 @@ class MultiUnitQuestionTest extends TestCase
 
         Sanctum::actingAs($teacher);
 
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
-            ->assertOk()
-            ->assertJsonPath('satisfiable', true);
+        $this->generateAndSave($blueprint->id);
 
         // The paper never labels a question with a unit the blueprint excluded.
         $placed = Paper::first()->paperQuestions()->first();
@@ -260,9 +267,7 @@ class MultiUnitQuestionTest extends TestCase
 
         Sanctum::actingAs($teacher);
 
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
-            ->assertOk()
-            ->assertJsonPath('satisfiable', true);
+        $this->generateAndSave($blueprint->id);
 
         $this->assertSame($u2->id, Paper::first()->paperQuestions()->first()->unit_id);
     }

@@ -71,9 +71,10 @@ const startGeneration = async () => {
   void blueprintsStore.fetch();
 };
 
+// The generated paper is an unsaved preview (no id yet) — open the preview page,
+// where the teacher reviews it and decides whether to Save it to History.
 const openPaper = () => {
-  const id = papersStore.current?.id;
-  if (id) router.push(`/teacher/paper/${id}`);
+  if (papersStore.current) router.push('/teacher/paper/preview');
 };
 
 // M5 — top up the bank with AI, then regenerate. Stays on the results panel so the
@@ -428,14 +429,14 @@ const unitBreakdown = (bp: Blueprint) =>
             </div>
             <div class="text-[13px] text-text2">
               All {{ totalConstraints }} constraints satisfied · {{ papersStore.current?.questions }} questions ·
-              {{ papersStore.current?.marks }} marks
+              {{ papersStore.current?.marks }} marks · not saved yet
             </div>
           </div>
         </div>
         <div class="flex flex-wrap gap-2 sm:ml-auto">
           <QFButton variant="secondary" @click="phase = 'select'">Generate Another</QFButton>
           <QFButton variant="primary" @click="openPaper">
-            View &amp; Export →
+            Review &amp; Save →
           </QFButton>
         </div>
       </div>

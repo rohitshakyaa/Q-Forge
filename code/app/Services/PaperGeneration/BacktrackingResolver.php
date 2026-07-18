@@ -4,6 +4,7 @@ namespace App\Services\PaperGeneration;
 
 use App\Models\Question;
 use App\Services\PaperGeneration\Support\CompiledBlueprint;
+use App\Services\PaperGeneration\Support\TieBreaker;
 use Illuminate\Support\Collection;
 
 /**
@@ -27,13 +28,14 @@ class BacktrackingResolver
 
     /**
      * @param  array<int, Collection<int, Question>>  $candidatesBySlot  slotIndex => full candidate pool
+     * @param  int|null  $seed  per-run seed for the final tie-break; null = id order
      * @return array<int, Question>|null  slotIndex => Question, or null if unresolved
      */
-    public function resolve(CompiledBlueprint $blueprint, array $candidatesBySlot): ?array
+    public function resolve(CompiledBlueprint $blueprint, array $candidatesBySlot, ?int $seed = null): ?array
     {
         $this->iterations = 0;
 
-        return $this->search($blueprint, $candidatesBySlot, 0, [], [], []);
+        return $this->search($blueprint, $candidatesBySlot, 0, [], [], [], $seed);
     }
 
     /**
@@ -41,6 +43,7 @@ class BacktrackingResolver
      * @param  array<int, Question>  $assigned  slotIndex => Question chosen so far
      * @param  int[]  $usedIds
      * @param  array<int, int>  $unitUse  unitId => questions counted against its cap
+     * @param  int|null  $seed  per-run tie-break seed
      * @return array<int, Question>|null
      */
     private function search(
@@ -50,6 +53,7 @@ class BacktrackingResolver
         array $assigned,
         array $usedIds,
         array $unitUse,
+        ?int $seed = null,
     ): ?array {
         if (++$this->iterations > self::MAX_ITERATIONS) {
             return null;
@@ -83,13 +87,14 @@ class BacktrackingResolver
 
                 return false;
             })
-            ->sort(function (Question $a, Question $b) use ($uncovered) {
+            ->sort(function (Question $a, Question $b) use ($uncovered, $seed) {
                 // A multi-unit question ranks uncovered-first when ANY of its
                 // tagged units is still uncovered.
                 $aRank = array_intersect($a->taggedUnitIds(), $uncovered) !== [] ? 0 : 1;
                 $bRank = array_intersect($b->taggedUnitIds(), $uncovered) !== [] ? 0 : 1;
 
-                return [$aRank, $a->used_count, $a->id] <=> [$bRank, $b->used_count, $b->id];
+                return [$aRank, $a->used_count, TieBreaker::key($seed, (int) $a->id)]
+                    <=> [$bRank, $b->used_count, TieBreaker::key($seed, (int) $b->id)];
             })
             ->values();
 
@@ -110,6 +115,7 @@ class BacktrackingResolver
                 $assigned,
                 [...$usedIds, $question->id],
                 $nextUnitUse,
+                $seed,
             );
 
             if ($result !== null) {

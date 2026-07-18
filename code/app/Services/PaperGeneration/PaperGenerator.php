@@ -6,6 +6,7 @@ use App\Models\Blueprint;
 use App\Models\Paper;
 use App\Models\PaperQuestion;
 use App\Models\Question;
+use App\Services\PaperGeneration\Contracts\SimilarityGuard;
 use App\Services\PaperGeneration\Support\CompiledBlueprint;
 use App\Services\PaperGeneration\Support\GenerationResult;
 use App\Services\PaperGeneration\Support\MissingSlot;
@@ -33,18 +34,32 @@ class PaperGenerator
     ) {
     }
 
-    public function generate(Blueprint $blueprint): GenerationResult
+    /**
+     * @param  int|null  $seed  per-run tie-break seed; null = the legacy fixed
+     *                          (id-ordered) paper. A distinct seed yields a
+     *                          distinct valid paper, so "regenerate" and two
+     *                          teachers no longer collide on one output.
+     * @param  SimilarityGuard|null  $guard  within-paper near-duplicate guard;
+     *                          null = no semantic dedup (pure id-uniqueness).
+     */
+    public function generate(Blueprint $blueprint, ?int $seed = null, ?SimilarityGuard $guard = null): GenerationResult
     {
+        $guard ??= new NullSimilarityGuard;
         $compiled = $this->compiler->compile($blueprint);
 
-        // Cross-paper repetition rule (M3): exclude every question used in the
-        // most recent N papers by the same owner for the same subject. Computed
-        // once and applied to both the greedy and the backtracking candidate
-        // pools so backtracking can't reintroduce an excluded question.
-        $lastN = $this->lastNExclusion($blueprint, $compiled);
+        // Candidate-exclusion rules, composed into one closure and applied to
+        // both the greedy and backtracking pools (so backtracking can't
+        // reintroduce an excluded question):
+        //   - lastNExclusion (M3): questions used in the most recent N papers.
+        //   - examYearExclusion (post-M6): questions whose provenance year is in
+        //     the last N years — "don't repeat recent exams' questions".
+        $exclusions = $this->composeExclusions([
+            $this->lastNExclusion($blueprint, $compiled),
+            $this->examYearExclusion($blueprint, $compiled),
+        ]);
 
         // Pass 1 — greedy (LRU) fill.
-        $greedy = $this->greedyFill($compiled, $lastN);
+        $greedy = $this->greedyFill($compiled, $exclusions, $seed, $guard);
         $constraints = $this->validator->validate($compiled, $greedy);
 
         if ($this->isComplete($compiled, $greedy) && $this->validator->allPass($constraints)) {
@@ -55,10 +70,15 @@ class PaperGenerator
         // when the blueprint is structurally infeasible (coverage outstrips the
         // paper's unit capacity, or caps can't fill the slots): no assignment
         // can exist, so the DFS would only burn its iteration budget.
-        $candidatesBySlot = $this->poolsBySlot($compiled, $lastN);
+        //
+        // Similarity is deliberately NOT enforced here: it is a soft preference,
+        // not a blueprint constraint, so it must never turn a satisfiable paper
+        // infeasible. The greedy pass already prefers dissimilar questions; the
+        // rare repair pass optimises for a valid assignment above all.
+        $candidatesBySlot = $this->poolsBySlot($compiled, $exclusions);
         $resolved = $compiled->structurallyInfeasible()
             ? null
-            : $this->resolver->resolve($compiled, $candidatesBySlot);
+            : $this->resolver->resolve($compiled, $candidatesBySlot, $seed);
 
         if ($resolved !== null) {
             $constraints = $this->validator->validate($compiled, $resolved);
@@ -117,23 +137,94 @@ class PaperGenerator
     }
 
     /**
-     * Fill each slot in order with the greedy pick, excluding questions already
-     * chosen in this paper and (via $lastN) those used in the last N papers.
-     * Threads the running covered-unit set into the selector (coverage-first
-     * rank) and rejects candidates that would exceed a per-unit cap.
+     * Build the exam-year exclusion closure (post-M6), or null when disabled.
      *
-     * @param  (callable(Builder): void)|null  $lastN
+     * Repetition by *provenance*: drop questions whose source exam year
+     * (`attributes.exam_year`, set at extraction from the uploaded past paper's
+     * year) falls in the N years immediately before the current calendar year —
+     * so a new paper won't reuse questions that were on recent real exams.
+     * N = 1 means "not last year's questions".
+     *
+     * Built as an excluded-**id** set (like lastNExclusion) so questions with no
+     * recorded year stay eligible: a bare `whereNotIn('attributes->exam_year')`
+     * would also drop null-year rows, which is the opposite of what we want.
+     *
+     * @return (callable(Builder): void)|null
+     */
+    private function examYearExclusion(Blueprint $blueprint, CompiledBlueprint $compiled): ?callable
+    {
+        if ($compiled->excludeExamYearsBack <= 0) {
+            return null;
+        }
+
+        // Reference = current calendar year; window = the N years before it.
+        $currentYear = (int) now()->year;
+        $excludedYears = [];
+        for ($y = $currentYear - 1; $y >= $currentYear - $compiled->excludeExamYearsBack; $y--) {
+            $excludedYears[] = (string) $y; // exam_year is stored as a JSON string
+        }
+
+        $excludedIds = Question::query()
+            ->where('subject_id', $blueprint->subject_id)
+            ->whereIn('attributes->exam_year', $excludedYears)
+            ->pluck('id')
+            ->all();
+
+        if (empty($excludedIds)) {
+            return null;
+        }
+
+        return fn (Builder $query) => $query->whereNotIn('id', $excludedIds);
+    }
+
+    /**
+     * Combine several optional candidate-exclusion closures into one, applied in
+     * order — or null when none are active. Lets CandidateFilter keep taking a
+     * single closure while the generator layers independent repetition rules.
+     *
+     * @param  array<int, (callable(Builder): void)|null>  $rules
+     * @return (callable(Builder): void)|null
+     */
+    private function composeExclusions(array $rules): ?callable
+    {
+        $active = array_values(array_filter($rules));
+
+        if ($active === []) {
+            return null;
+        }
+
+        return function (Builder $query) use ($active) {
+            foreach ($active as $rule) {
+                $rule($query);
+            }
+        };
+    }
+
+    /**
+     * Fill each slot in order with the greedy pick, excluding questions already
+     * chosen in this paper and (via $exclusions) the composed repetition rules.
+     * Threads the running covered-unit set into the selector (coverage-first
+     * rank), rejects candidates that would exceed a per-unit cap, and — when a
+     * SimilarityGuard is active — prefers candidates that are not near-duplicates
+     * of questions already placed in this paper.
+     *
+     * @param  (callable(Builder): void)|null  $exclusions
      * @return array<int, Question>
      */
-    private function greedyFill(CompiledBlueprint $compiled, ?callable $lastN = null): array
-    {
+    private function greedyFill(
+        CompiledBlueprint $compiled,
+        ?callable $exclusions = null,
+        ?int $seed = null,
+        ?SimilarityGuard $guard = null,
+    ): array {
+        $guard ??= new NullSimilarityGuard;
         $selections = [];
         $usedIds = [];
         $covered = [];
         $unitUse = [];
 
         foreach ($compiled->slots as $slot) {
-            $pool = $this->filter->for($slot, $compiled, $usedIds, $lastN);
+            $pool = $this->filter->for($slot, $compiled, $usedIds, $exclusions);
 
             if ($compiled->unitCaps !== []) {
                 $pool = $pool->reject(
@@ -141,8 +232,23 @@ class PaperGenerator
                 )->values();
             }
 
+            // Prefer questions that don't semantically repeat one already placed.
+            // Soft, not hard: if dropping near-duplicates would empty the pool we
+            // keep the full pool, so dedup never causes a shortfall. Fails open
+            // when the guard has no signal (RAG off / index down).
+            $guard->prime($pool);
+            if ($selections !== []) {
+                $fresh = $pool->reject(
+                    fn (Question $q) => $guard->tooSimilar($q, $selections)
+                )->values();
+
+                if ($fresh->isNotEmpty()) {
+                    $pool = $fresh;
+                }
+            }
+
             $uncovered = array_values(array_diff($compiled->allowedUnitIds, $covered));
-            $pick = $this->selector->pick($pool, $uncovered);
+            $pick = $this->selector->pick($pool, $uncovered, $seed);
 
             if ($pick !== null) {
                 $selections[$slot->index] = $pick;
@@ -181,16 +287,17 @@ class PaperGenerator
 
     /**
      * Full candidate pool per slot (no per-paper exclusions — the resolver
-     * enforces uniqueness itself — but the cross-paper $lastN rule still applies).
+     * enforces uniqueness itself — but the composed cross-paper/year
+     * $exclusions still apply).
      *
-     * @param  (callable(Builder): void)|null  $lastN
+     * @param  (callable(Builder): void)|null  $exclusions
      * @return array<int, Collection<int, Question>>
      */
-    private function poolsBySlot(CompiledBlueprint $compiled, ?callable $lastN = null): array
+    private function poolsBySlot(CompiledBlueprint $compiled, ?callable $exclusions = null): array
     {
         $pools = [];
         foreach ($compiled->slots as $slot) {
-            $pools[$slot->index] = $this->filter->for($slot, $compiled, [], $lastN);
+            $pools[$slot->index] = $this->filter->for($slot, $compiled, [], $exclusions);
         }
 
         return $pools;

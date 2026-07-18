@@ -49,7 +49,7 @@ class PaperExportTest extends TestCase
                 ],
                 'unitRules' => ['Unit 1' => true, 'Unit 2' => true, 'Unit 3' => true],
                 'unitAllocations' => [],
-                'exclusionRules' => ['lastNPapers' => $lastNPapers, 'reuseThreshold' => 3],
+                'exclusionRules' => ['lastNPapers' => $lastNPapers, 'excludeExamYearsBack' => 0],
             ],
         ]);
 
@@ -62,16 +62,29 @@ class PaperExportTest extends TestCase
         return $paper->paperQuestions()->pluck('question_id')->sort()->values()->all();
     }
 
+    /**
+     * Generate a preview then Save it — the two-step flow the UI now uses — and
+     * return the persisted paper. (Generate no longer persists on its own.)
+     */
+    private function generateAndSave(Blueprint $blueprint): Paper
+    {
+        $seed = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
+            ->assertOk()->assertJsonPath('satisfiable', true)->json('seed');
+
+        $id = $this->postJson('/api/papers', ['blueprint_id' => $blueprint->id, 'seed' => $seed])
+            ->assertCreated()->json('paper.id');
+
+        return Paper::findOrFail($id);
+    }
+
     public function test_second_generation_excludes_questions_from_the_last_n_papers(): void
     {
         // 2 per unit = 6 short@4; one paper needs 3 → enough for exactly two disjoint papers.
         [$teacher, , $blueprint] = $this->seedDeepBank(perUnit: 2, lastNPapers: 1);
         Sanctum::actingAs($teacher);
 
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
-            ->assertOk()->assertJsonPath('satisfiable', true);
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
-            ->assertOk()->assertJsonPath('satisfiable', true);
+        $this->generateAndSave($blueprint);
+        $this->generateAndSave($blueprint);
 
         $papers = Paper::orderBy('id')->get();
         $this->assertCount(2, $papers);
@@ -89,8 +102,7 @@ class PaperExportTest extends TestCase
         [$teacher, , $blueprint] = $this->seedDeepBank(perUnit: 2, lastNPapers: 0);
         Sanctum::actingAs($teacher);
 
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])->assertOk();
-        $paper = Paper::firstOrFail();
+        $paper = $this->generateAndSave($blueprint);
 
         $response = $this->get("/api/papers/{$paper->id}/export?format=pdf");
         $response->assertOk();
@@ -107,8 +119,7 @@ class PaperExportTest extends TestCase
         [$teacher, , $blueprint] = $this->seedDeepBank(perUnit: 2, lastNPapers: 0);
         Sanctum::actingAs($teacher);
 
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])->assertOk();
-        $paper = Paper::firstOrFail();
+        $paper = $this->generateAndSave($blueprint);
 
         $this->get("/api/papers/{$paper->id}/export?format=pdf")->assertOk();
         $response = $this->get("/api/papers/{$paper->id}/export?format=docx");
@@ -123,8 +134,7 @@ class PaperExportTest extends TestCase
     {
         [$teacher, , $blueprint] = $this->seedDeepBank(perUnit: 2, lastNPapers: 0);
         Sanctum::actingAs($teacher);
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])->assertOk();
-        $paper = Paper::firstOrFail();
+        $paper = $this->generateAndSave($blueprint);
 
         $this->getJson("/api/papers/{$paper->id}/export?format=txt")->assertStatus(422);
     }
@@ -133,8 +143,7 @@ class PaperExportTest extends TestCase
     {
         [$teacher, , $blueprint] = $this->seedDeepBank(perUnit: 2, lastNPapers: 0);
         Sanctum::actingAs($teacher);
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])->assertOk();
-        $paper = Paper::firstOrFail();
+        $paper = $this->generateAndSave($blueprint);
 
         $this->getJson('/api/papers')->assertOk()->assertJsonCount(1, 'data');
 
@@ -148,7 +157,7 @@ class PaperExportTest extends TestCase
     {
         [$teacher, , $blueprint] = $this->seedDeepBank(perUnit: 2, lastNPapers: 0);
         Sanctum::actingAs($teacher);
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])->assertOk();
+        $this->generateAndSave($blueprint);
 
         $this->getJson('/api/papers/analytics')
             ->assertOk()

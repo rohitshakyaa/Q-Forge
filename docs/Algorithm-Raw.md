@@ -11,9 +11,13 @@ produce a valid paper or explain precisely why none exists.
 - A **specification** describing the desired paper:
   - an ordered list of **groups**, each requiring a number of questions of a fixed **kind** and a
     fixed **weight** (marks);
-  - a set of **permitted topics**;
+  - a set of **permitted topics**, each optionally carrying a **maximum** number of questions it may
+    contribute;
   - a required **total weight** for the whole paper.
-- A **pool** of available questions, each with a kind, a weight, a topic, and a usage history.
+- A **pool** of available questions, each with a kind, a weight, one or more topics, and a usage
+  history.
+- A **run key** — a value chosen afresh for each run (or fixed to reproduce a previous paper) that
+  settles ties between otherwise-equal candidates.
 
 ## Output
 
@@ -26,7 +30,13 @@ produce a valid paper or explain precisely why none exists.
 1. **Counts** — each group holds exactly the number of questions it asks for.
 2. **Total weight** — the sum of all question weights equals the required total.
 3. **Topic coverage** — every permitted topic appears at least once.
-4. **No repetition** — no question appears twice in the same paper.
+4. **Topic maximums** — no topic contributes more than its stated maximum (topics without a stated
+   maximum are unlimited). A question belonging to several topics counts toward each of them.
+5. **No repetition** — no question appears twice in the same paper.
+
+A softer **preference**, not a rule: where a choice is otherwise free, avoid placing a question that
+is very **similar in meaning** to one already in the paper. It never overrides a rule and never
+blocks a paper — see Step 2.
 
 ---
 
@@ -44,15 +54,21 @@ question of that kind and weight. The positions keep the group order.
 ### Step 2 — First attempt: greedy fill
 Walk the positions in order. For each position:
 1. Gather every eligible question — one whose kind and weight match the position, whose topic is
-   permitted, and which has not already been placed in this paper.
-2. Order those candidates by **least-recently-used first** (fewest past uses, ties broken by a
-   fixed stable key), and take the first one.
-3. If at least one candidate exists, place it and remember it so it cannot be reused; if none
-   exists, leave the position empty.
+   permitted, whose placement would not exceed any topic maximum so far, and which has not already
+   been placed in this paper.
+2. **Prefer variety:** set aside candidates that are very similar in meaning to a question already
+   placed — *unless* setting them aside would leave nothing, in which case keep them all. This is a
+   preference, never a blocker: it can never empty the set of choices, and if the similarity signal
+   is unavailable it simply does nothing.
+3. Order what remains by **least-recently-used first** (fewest past uses), then by the **run key**
+   (which settles ties — a fixed value reproduces a previous paper, a fresh value yields a different
+   valid one), and take the first.
+4. If at least one candidate exists, place it and remember it so it cannot be reused, updating the
+   covered topics and per-topic tallies; if none exists, leave the position empty.
 
-This step is intentionally **blind to topic coverage** — it only optimises freshness. That blindness
-is what allows it to occasionally produce a paper that is complete yet fails coverage (for example,
-by drawing every question from only a few topics), which the next step exists to fix.
+This step is intentionally **blind to topic coverage** — it only optimises freshness (and variety).
+That blindness is what allows it to occasionally produce a paper that is complete yet fails coverage
+(for example, by drawing every question from only a few topics), which the next step exists to fix.
 
 ### Step 3 — Check the rules
 Measure the filled paper against all four rules. If every position is filled **and** every rule
@@ -63,7 +79,10 @@ If the greedy paper is invalid, search for a fully valid arrangement by systemat
 1. For every position, prepare its complete set of eligible candidates.
 2. Fill positions one at a time, in order. At each position, try its candidates ordered so that
    **questions from not-yet-covered topics come first** (then by least-recently-used, then by the
-   stable key). Never reuse a question already chosen on the current attempt.
+   run key). Skip any that would exceed a topic maximum on the current path, and never reuse a
+   question already chosen on the current attempt. *(The similarity preference from Step 2 is
+   deliberately not applied here: it is a soft preference, not a rule, and enforcing it during repair
+   could reject the only valid arrangement. Repair optimises for a valid paper above all.)*
 3. Each time a choice is made, move on to the next position. If a later position cannot be completed,
    undo the most recent choice and try the next candidate instead. When the last position is reached,
    accept the arrangement **only if every topic is covered**; otherwise keep backtracking.
@@ -85,11 +104,17 @@ far, together with a precise statement of what is missing, determined in two tie
 
 ## A note on repeatability
 
-The candidate ordering is a **total order** (least-recently-used, then a fixed stable key), so the
-method is fully deterministic: the same pool and the same specification always yield the same paper.
-For successive papers to differ, the usage history must change between runs (each placed question
-becoming "more used") and recently produced papers must be excluded from future pools — both of which
-are properties of the surrounding workflow rather than of this core method.
+The candidate ordering is a **total order** (least-recently-used, then the run key), so the method is
+**deterministic given its run key**: the same pool, the same specification *and the same run key*
+always yield the same paper — which is what makes any result reproducible and re-checkable. The run
+key is the method's only source of variation, and it only reorders candidates the rest of the
+ordering already ties, so it never overrides counts, coverage, maximums or any rule.
+
+Because a fresh run key is normally chosen per run, two runs of the *same* specification produce two
+*different* valid papers — so the method no longer collapses to one fixed output. (Two further
+sources of divergence live in the surrounding workflow: usage history changes as placed questions
+become "more used", and recently produced papers are excluded from future pools.) Fix the run key and
+the paper is reproduced exactly.
 
 ---
 
@@ -111,8 +136,8 @@ flowchart TD
     A([Start: specification + question pool]) --> B[Expand specification into ordered positions]
 
     B --> C[/First attempt: greedy fill — for each position in order/]
-    C --> D[Gather eligible questions:<br/>matching kind and weight,<br/>permitted topic, not already used]
-    D --> E[Choose the least-recently-used candidate]
+    C --> D[Gather eligible questions:<br/>matching kind and weight, permitted topic,<br/>within topic maximum, not already used<br/>prefer ones unlike those already placed soft]
+    D --> E[Choose least-recently-used,<br/>then by the run key]
     E --> F{More positions to fill?}
     F -- yes --> C
 
@@ -140,23 +165,26 @@ flowchart TD
 ## Pseudocode
 
 ```
-GENERATE(specification, pool):
+GENERATE(specification, pool, runKey):
     positions ← expand each group into one position per required question, in order
 
     # First attempt — greedy
     chosen ← empty
     for each position in positions:
         candidates ← questions in pool matching the position's kind and weight,
-                     with a permitted topic, not already in chosen
-        order candidates by least-recently-used, then a stable key
+                     with a permitted topic, within every topic's maximum given chosen,
+                     not already in chosen
+        fresh ← candidates minus those very similar in meaning to something in chosen
+        if fresh not empty: candidates ← fresh          # preference only — never empties
+        order candidates by least-recently-used, then by runKey
         if candidates not empty:
             place the first candidate into the position; add it to chosen
 
     if every position filled and ALL-RULES-PASS(chosen, specification):
         return SUCCESS(chosen)
 
-    # Second attempt — backtracking
-    arrangement ← SEARCH(positions, 0, empty)        # depth-first, bounded by a trial limit
+    # Second attempt — backtracking (similarity preference intentionally dropped here)
+    arrangement ← SEARCH(positions, 0, empty, runKey)   # depth-first, bounded by a trial limit
     if arrangement found:
         return SUCCESS(arrangement)
 
@@ -164,14 +192,15 @@ GENERATE(specification, pool):
     return FAILURE(best partial = chosen, shortfall = EXPLAIN(positions, pool))
 
 
-SEARCH(positions, index, partial):
+SEARCH(positions, index, partial, runKey):
     if trial limit exceeded: return none
     if index = number of positions:
         return partial if every permitted topic is covered, else none
-    candidates ← eligible questions for positions[index], not used in partial
-    order candidates by (uncovered topic first, then least-recently-used, then stable key)
+    candidates ← eligible questions for positions[index], not used in partial,
+                 and not exceeding any topic maximum on this path
+    order candidates by (uncovered topic first, then least-recently-used, then runKey)
     for each candidate:
-        result ← SEARCH(positions, index + 1, partial + candidate)
+        result ← SEARCH(positions, index + 1, partial + candidate, runKey)
         if result found: return result
     return none
 
@@ -180,6 +209,7 @@ ALL-RULES-PASS(chosen, specification):
     return  each group has exactly its required count
         and total weight equals the required total
         and every permitted topic appears at least once
+        and no topic exceeds its stated maximum
         and no question repeats
 
 

@@ -123,6 +123,44 @@ class QdrantClient
     }
 
     /**
+     * Fetch stored vectors by point id — the inverse of {@see search()}, for
+     * when the caller already knows which points it wants (e.g. the paper
+     * engine comparing a handful of candidate questions to each other rather
+     * than to the whole index). One round-trip for the batch; ids with no
+     * stored point are simply absent from the result.
+     *
+     * @param  array<int, int|string>  $ids
+     * @return array<int, array<int, float>>  pointId => vector
+     */
+    public function retrieve(string $collection, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $response = $this->client()->post("/collections/{$collection}/points", [
+            'ids' => array_values($ids),
+            'with_vector' => true,
+            'with_payload' => false,
+        ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException(
+                "qdrant retrieve from '{$collection}' returned HTTP {$response->status()}"
+            );
+        }
+
+        $vectors = [];
+        foreach ($response->json('result') ?? [] as $point) {
+            if (isset($point['id'], $point['vector']) && is_array($point['vector'])) {
+                $vectors[(int) $point['id']] = $point['vector'];
+            }
+        }
+
+        return $vectors;
+    }
+
+    /**
      * Remove points by id — e.g. when a question is deleted or rejected, its
      * vector must not keep matching searches.
      *

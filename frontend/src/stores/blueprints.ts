@@ -27,7 +27,7 @@ export interface Blueprint {
   sections: BlueprintSection[];
   unitRules: Record<string, boolean>;
   unitAllocations: Record<string, UnitAllocation[]>;
-  exclusionRules: { lastNPapers: number; reuseThreshold: number };
+  exclusionRules: { lastNPapers: number; excludeExamYearsBack: number };
   aiAssist: boolean;
   lastUsed: string;
 }
@@ -44,7 +44,7 @@ interface ApiBlueprint {
     sections?: BlueprintSection[];
     unitRules?: Record<string, boolean>;
     unitAllocations?: Record<string, UnitAllocation[]>;
-    exclusionRules?: { lastNPapers: number; reuseThreshold: number };
+    exclusionRules?: { lastNPapers: number; excludeExamYearsBack: number };
   };
 }
 
@@ -66,7 +66,12 @@ const mapFromApi = (b: ApiBlueprint): Blueprint => {
     sections,
     unitRules,
     unitAllocations: b.definition.unitAllocations ?? {},
-    exclusionRules: b.definition.exclusionRules ?? { lastNPapers: 2, reuseThreshold: 3 },
+    // Normalise per key so blueprints saved with the old shape (reuseThreshold,
+    // no excludeExamYearsBack) still bind cleanly to the sliders.
+    exclusionRules: {
+      lastNPapers: b.definition.exclusionRules?.lastNPapers ?? 2,
+      excludeExamYearsBack: b.definition.exclusionRules?.excludeExamYearsBack ?? 0,
+    },
     aiAssist: b.ai_assist,
     lastUsed: b.last_used_at ? formatDate(b.last_used_at) : 'Never',
     questions: derivedQuestions(sections),
@@ -135,7 +140,7 @@ export const useBlueprintsStore = defineStore('blueprints', () => {
     ],
     unitRules: {},
     unitAllocations: {},
-    exclusionRules: { lastNPapers: 2, reuseThreshold: 3 },
+    exclusionRules: { lastNPapers: 2, excludeExamYearsBack: 0 },
     aiAssist: true,
     lastUsed: 'Never',
   });

@@ -234,7 +234,9 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
           </div>
 
           <div style="font-size: 11.5px; color: var(--text3); margin-bottom: 14px">
-            Last used: {{ bp.lastUsed }} · Excludes last {{ bp.exclusionRules.lastNPapers }} papers
+            Last used: {{ bp.lastUsed }} · Excludes last {{ bp.exclusionRules.lastNPapers }} papers<span
+              v-if="bp.exclusionRules.excludeExamYearsBack"
+            > · last {{ bp.exclusionRules.excludeExamYearsBack }} exam years</span>
           </div>
 
           <div style="display: flex; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto">

@@ -12,9 +12,11 @@ use App\Services\PaperGeneration\BacktrackingResolver;
 use App\Services\PaperGeneration\BlueprintCompiler;
 use App\Services\PaperGeneration\CandidateFilter;
 use App\Services\PaperGeneration\ConstraintValidator;
+use App\Services\PaperGeneration\Contracts\SimilarityGuard;
 use App\Services\PaperGeneration\GreedySelector;
 use App\Services\PaperGeneration\PaperGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Tests\TestCase;
 
 class PaperGeneratorTest extends TestCase
@@ -39,7 +41,7 @@ class PaperGeneratorTest extends TestCase
      * @param  string[]  $allowedUnitNames
      * @param  array<string, array<int, array{marks:int, count:int}>>  $unitAllocations  per-unit MAX cap rows
      */
-    private function makeBlueprint(Subject $subject, array $sections, array $allowedUnitNames, int $totalMarks, array $unitAllocations = []): Blueprint
+    private function makeBlueprint(Subject $subject, array $sections, array $allowedUnitNames, int $totalMarks, array $unitAllocations = [], int $excludeExamYearsBack = 0): Blueprint
     {
         $sectionDefs = [];
         foreach ($sections as $i => $s) {
@@ -67,7 +69,7 @@ class PaperGeneratorTest extends TestCase
                     'sections' => $sectionDefs,
                     'unitRules' => $unitRules,
                     'unitAllocations' => $unitAllocations,
-                    'exclusionRules' => ['lastNPapers' => 0, 'reuseThreshold' => 3],
+                    'exclusionRules' => ['lastNPapers' => 0, 'excludeExamYearsBack' => $excludeExamYearsBack],
                 ],
             ]);
     }
@@ -534,5 +536,208 @@ class PaperGeneratorTest extends TestCase
         $chosen = collect($second->selections)->map(fn (Question $q) => $q->id)->all();
         $this->assertCount(1, $chosen);
         $this->assertContains($chosen[0], [$q1->id, $q2->id], 'Imported exam did not age out of the rolling window.');
+    }
+
+    public function test_no_seed_preserves_the_legacy_deterministic_id_ordering(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        // Slack: 6 candidates for 3 slots, all used_count 0 → tie-break decides.
+        $this->seedQuestions($subject, $u1, 'short', 4, 6);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 3, 'marksEach' => 4],
+        ], ['Unit 1'], 12);
+
+        // With no seed the greedy pass falls to ascending id: the three lowest ids.
+        $expected = Question::where('subject_id', $subject->id)->orderBy('id')->limit(3)->pluck('id')->all();
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        $this->assertSame($expected, collect($result->selections)->map(fn (Question $q) => (int) $q->id)->values()->all());
+    }
+
+    public function test_same_seed_is_reproducible_and_different_seeds_vary_the_paper(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        // Generous slack so a reshuffle has room to land differently.
+        $this->seedQuestions($subject, $u1, 'short', 4, 20);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 5, 'marksEach' => 4],
+        ], ['Unit 1'], 20);
+
+        $ids = fn ($r) => collect($r->selections)->map(fn (Question $q) => (int) $q->id)->values()->all();
+
+        $a1 = $ids($this->generator()->generate($blueprint, seed: 111));
+        $a2 = $ids($this->generator()->generate($blueprint, seed: 111));
+        $b = $ids($this->generator()->generate($blueprint, seed: 999));
+
+        // Reproducible: identical seed → identical paper.
+        $this->assertSame($a1, $a2);
+        // Varied: a different seed selects a different set (given the slack above).
+        $this->assertNotSame($a1, $b);
+        // Still a valid paper: five distinct questions.
+        $this->assertCount(5, array_unique($b));
+    }
+
+    public function test_greedy_pass_avoids_a_near_duplicate_when_an_alternative_exists(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        $this->seedQuestions($subject, $u1, 'short', 4, 3);
+
+        [$a, $b, $c] = Question::where('subject_id', $subject->id)->orderBy('id')->get()->all();
+
+        // Mark A and B as semantic duplicates; C is distinct. Two slots.
+        $guard = $this->fakeGuard([$a->id => 1, $b->id => 1, $c->id => 2]);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], ['Unit 1'], 8);
+
+        $result = $this->generator()->generate($blueprint, seed: null, guard: $guard);
+
+        $this->assertTrue($result->satisfiable);
+        $chosen = collect($result->selections)->map(fn (Question $q) => (int) $q->id)->all();
+        // A is picked first (lowest id); the guard then steers slot 2 to C, not B.
+        $this->assertSame([$a->id, $c->id], $chosen);
+    }
+
+    public function test_duplicate_avoidance_never_causes_a_shortfall(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        // Only two questions, and the guard says they are duplicates of each other.
+        $this->seedQuestions($subject, $u1, 'short', 4, 2);
+
+        [$a, $b] = Question::where('subject_id', $subject->id)->orderBy('id')->get()->all();
+        $guard = $this->fakeGuard([$a->id => 1, $b->id => 1]);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], ['Unit 1'], 8);
+
+        $result = $this->generator()->generate($blueprint, seed: null, guard: $guard);
+
+        // Soft preference: with no fresh alternative the paper is still filled.
+        $this->assertTrue($result->satisfiable);
+        $this->assertSame([$a->id, $b->id], collect($result->selections)->map(fn (Question $q) => (int) $q->id)->all());
+    }
+
+    public function test_excludes_questions_from_a_recent_exam_year(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+
+        $lastYear = (string) (now()->year - 1);
+
+        // Both fit the slot; the stale one has the lower id, so plain LRU would
+        // pick it first — proving the year rule is what removes it.
+        $stale = $this->seedQuestionWithYear($subject, $u1, $lastYear);
+        $fresh = $this->seedQuestionWithYear($subject, $u1, null);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 1, 'marksEach' => 4],
+        ], ['Unit 1'], 4, excludeExamYearsBack: 1);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        // Last year's question is filtered out; the year-less one is picked.
+        $this->assertSame([$fresh->id], collect($result->selections)->map(fn (Question $q) => (int) $q->id)->all());
+        $this->assertNotContains($stale->id, collect($result->selections)->map(fn (Question $q) => (int) $q->id)->all());
+    }
+
+    public function test_exam_year_exclusion_is_inert_when_zero(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+
+        // A last-year question is eligible again when the rule is off (default 0).
+        $stale = $this->seedQuestionWithYear($subject, $u1, (string) (now()->year - 1));
+        $this->seedQuestionWithYear($subject, $u1, null);
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 1, 'marksEach' => 4],
+        ], ['Unit 1'], 4);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        // Lowest id wins under plain LRU — the stale question is picked normally.
+        $this->assertSame([$stale->id], collect($result->selections)->map(fn (Question $q) => (int) $q->id)->all());
+    }
+
+    public function test_exam_year_exclusion_only_covers_the_window_and_keeps_year_less_questions(): void
+    {
+        $subject = Subject::factory()->create();
+        $u1 = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+
+        // Window with N=1 is just {last year}. A two-years-ago question is OUTSIDE
+        // it and stays eligible; a year-less question is always eligible.
+        $older = $this->seedQuestionWithYear($subject, $u1, (string) (now()->year - 2));
+        $noYear = $this->seedQuestionWithYear($subject, $u1, null);
+        $recent = $this->seedQuestionWithYear($subject, $u1, (string) (now()->year - 1));
+
+        $blueprint = $this->makeBlueprint($subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], ['Unit 1'], 8, excludeExamYearsBack: 1);
+
+        $result = $this->generator()->generate($blueprint);
+
+        $this->assertTrue($result->satisfiable);
+        $chosen = collect($result->selections)->map(fn (Question $q) => (int) $q->id)->all();
+        // The two survivors fill both slots; last year's question is excluded.
+        $this->assertEqualsCanonicalizing([$older->id, $noYear->id], $chosen);
+        $this->assertNotContains($recent->id, $chosen);
+    }
+
+    /** Create one approved question in $unit, optionally tagged with an exam year. */
+    private function seedQuestionWithYear(Subject $subject, Unit $unit, ?string $examYear): Question
+    {
+        return Question::factory()->create([
+            'subject_id' => $subject->id,
+            'unit_id' => $unit->id,
+            'type' => 'short',
+            'marks' => 4,
+            'status' => 'approved',
+            'attributes' => $examYear !== null ? ['exam_year' => $examYear] : null,
+        ]);
+    }
+
+    /**
+     * A deterministic in-memory SimilarityGuard: two questions are "duplicates"
+     * when they share a group key. Lets the engine's dedup path be tested with
+     * no Qdrant/embeddings.
+     *
+     * @param  array<int, int>  $groupByQuestionId
+     */
+    private function fakeGuard(array $groupByQuestionId): SimilarityGuard
+    {
+        return new class($groupByQuestionId) implements SimilarityGuard
+        {
+            /** @param array<int, int> $group */
+            public function __construct(private array $group) {}
+
+            public function prime(Collection $questions): void {}
+
+            public function tooSimilar(Question $candidate, array $chosen): bool
+            {
+                $group = $this->group[(int) $candidate->id] ?? null;
+                if ($group === null) {
+                    return false;
+                }
+                foreach ($chosen as $c) {
+                    if (($this->group[(int) $c->id] ?? null) === $group) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        };
     }
 }

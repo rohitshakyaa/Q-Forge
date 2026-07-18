@@ -161,7 +161,7 @@ class QForgeDemoSeeder extends Seeder
                     ],
                     'unitRules' => $unitRules,
                     'unitAllocations' => $unitAllocations,
-                    'exclusionRules' => ['lastNPapers' => 2, 'reuseThreshold' => 3],
+                    'exclusionRules' => ['lastNPapers' => 2, 'excludeExamYearsBack' => 0],
                 ],
                 'last_used_at' => null,
             ]
@@ -197,7 +197,7 @@ class QForgeDemoSeeder extends Seeder
                     ],
                     'unitRules' => $unitRules,
                     'unitAllocations' => [],
-                    'exclusionRules' => ['lastNPapers' => 2, 'reuseThreshold' => 3],
+                    'exclusionRules' => ['lastNPapers' => 2, 'excludeExamYearsBack' => 0],
                 ],
                 'last_used_at' => null,
             ]

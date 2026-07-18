@@ -253,6 +253,7 @@ Build order — each phase lands demoable and green before the next:
 | 1 | Dedup: embed questions on write, drop AI near-dupes, flag review-queue lookalikes | **Done** |
 | 2 | Grounding retrieval: chunk + index content, budget-based hybrid in `GroundingBuilder`, semantic exemplars | **Done** |
 | 3 | Unit auto-suggest in the extraction review queue | **Done** |
+| 4 (post-M6) | Within-paper duplicate guard: the generator reuses the question index to avoid near-duplicates on one paper | **Done** |
 
 ## Phase 0 — the embedding pipeline (infrastructure)
 
@@ -546,6 +547,64 @@ by [`RagUnitSuggestTest`](../code/tests/Feature/RagUnitSuggestTest.php) (ranking
 floor, syllabus-chunk exclusion, one-pass annotation with the similar flag). Suites: 198 Laravel
 / 153 pytest green.
 
+## Phase 4 (post-M6) — the generator becomes a fourth consumer
+
+The first three phases held one line: RAG curates what enters the **bank** and the **prompt**, never
+what lands on a **paper** — the deterministic engine owned selection alone. Phase 4 softens that line
+by exactly one notch, on purpose. The question index built in Phase 1 already knows which questions
+*mean* the same thing; the paper generator can now use it to avoid putting two of them on the same
+paper — something id-only de-duplication (its existing "no repeated questions" rule) can never catch,
+because "Define a binary tree" and "What is a binary tree?" are different rows.
+
+### How it works
+
+- [`Contracts/SimilarityGuard`](../code/app/Services/PaperGeneration/Contracts/SimilarityGuard.php) —
+  a tiny interface (`prime()` + `tooSimilar()`) the generation engine depends on, with two
+  implementations. The default is the no-op
+  [`NullSimilarityGuard`](../code/app/Services/PaperGeneration/NullSimilarityGuard.php), so the engine
+  stays a pure, deterministic function of the bank in unit tests and the bank-expansion feasibility
+  probe.
+- [`VectorSimilarityGuard`](../code/app/Services/PaperGeneration/VectorSimilarityGuard.php) — the real
+  one. `prime($pool)` batch-loads the candidates' vectors **by id** from Qdrant in one call (a new
+  [`QdrantClient::retrieve`](../code/app/Services/Rag/QdrantClient.php) — the inverse of `search`:
+  you already know the ids, you just want their vectors), memoised across slots. `tooSimilar()` then
+  runs the §3 cosine (`VectorMath::cosine`) against every question already placed on the paper,
+  reusing the same `RAG_DUPLICATE_THRESHOLD` (0.90) as every other dedup surface.
+- The engine wires it into the **greedy pass only**
+  ([`PaperGenerator::greedyFill`](../code/app/Services/PaperGeneration/PaperGenerator.php)): after
+  the cap filter, it drops candidates that are near-duplicates of already-placed questions — *unless*
+  that would empty the pool, in which case it keeps the full pool. So the guard is a **preference,
+  not a constraint**.
+
+### Why it's soft, and why not in backtracking
+
+Three deliberate limits keep this from touching the algorithm's correctness contract:
+
+1. **Never empties a pool** → dedup can never manufacture a shortfall. A paper the engine could fill
+   before, it can still fill.
+2. **Greedy pass only, never backtracking** → similarity is a soft preference, not a blueprint rule.
+   If the rare repair pass had to satisfy it too, a paper that is *only* fillable with somewhat-similar
+   questions would flip from satisfiable to infeasible — unacceptable for a soft signal (and
+   embedding similarity has false positives: "Define TCP" vs "Define UDP" score high — §1's
+   `SimilarQuestionFinder` note).
+3. **Fails open** → RAG off or Qdrant down ⇒ the guard reports "nothing is similar" and generation
+   proceeds on id-uniqueness alone, exactly as before Phase 4. Same posture as every other consumer.
+
+This is the one place RAG reaches into paper selection, and it reaches only as far as *breaking a tie
+toward variety*. The deterministic rules still decide whether a paper is valid and which constraints
+it must meet. (It also pairs with the post-M6 **seeded tie-break** — see PLAN.md / VIVA-GUIDE §3 —
+which varies *which* valid paper a run produces; together they answer "regenerate gave me the same
+paper with a near-duplicate in it" from both sides.)
+
+### Seen working
+
+Verified by [`VectorSimilarityGuardTest`](../code/tests/Unit/PaperGeneration/VectorSimilarityGuardTest.php)
+(fail-open when RAG is disabled, cosine-over-threshold flags a duplicate, orthogonal vectors don't,
+fail-open on an index error) and by the generator tests in
+[`PaperGeneratorTest`](../code/tests/Unit/PaperGeneration/PaperGeneratorTest.php) (greedy avoids a
+near-duplicate when an alternative exists; never causes a shortfall when it doesn't). Suite: 220
+Laravel green.
+
 ---
 
 # M6 complete — what got built, in one paragraph
@@ -557,6 +616,9 @@ as a rebuildable index — MySQL never stopped being the source of truth), one n
 of that base: **dedup** (auto-drop for the automated AI pipeline, flag-only for the human review
 queue), **retrieval-augmented grounding** (budget-based hybrid — whole corpus when it fits,
 top-k chunks when it doesn't — plus semantic exemplars), and **unit auto-suggest** (the chunk
-index reused as a classifier). The generation *algorithm* — the deterministic centerpiece —
-never ceded a decision: RAG curates what enters the bank and what enters the prompt, never what
-lands on a paper.
+index reused as a classifier). A later post-M6 phase added a fourth consumer — a **within-paper
+duplicate guard** that reuses the question index so one paper avoids near-duplicate questions. The
+generation *algorithm* — the deterministic centerpiece — still never ceded a *decision*: RAG curates
+what enters the bank and what enters the prompt, and at most *nudges* a paper toward variety (a soft,
+fail-open tie-break preference that can never cause a shortfall). Selection and every constraint stay
+with the algorithm.

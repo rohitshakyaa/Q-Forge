@@ -112,6 +112,7 @@ const detailDate = computed(() => {
             <th>Subject</th>
             <th>Unit</th>
             <th>Type</th>
+            <th>Source</th>
             <th>Marks</th>
             <th>Used</th>
           </tr>
@@ -140,6 +141,12 @@ const detailDate = computed(() => {
               <span style="font-family: var(--font-mono); font-size: 12px; color: var(--cyan)">
                 {{ q.subject }}
               </span>
+              <div v-if="q.subjectName" style="color: var(--text2); font-size: 12px; margin-top: 2px">
+                {{ q.subjectName }}
+              </div>
+              <QFBadge v-if="q.examYear" variant="neutral" style="margin-top: 4px">
+                {{ q.examYear }}
+              </QFBadge>
             </td>
             <td style="color: var(--text2); font-size: 12.5px">
               {{ q.unit }}
@@ -151,6 +158,7 @@ const detailDate = computed(() => {
               >+ {{ extra.name }}</QFBadge>
             </td>
             <td><QFBadge variant="neutral">{{ q.type }}</QFBadge></td>
+            <td style="color: var(--text2); font-size: 12.5px">{{ q.source ?? '—' }}</td>
             <td style="font-family: var(--font-mono); font-size: 13px; font-weight: 600">
               {{ q.marks }}
             </td>
@@ -205,10 +213,13 @@ const detailDate = computed(() => {
     <QFModal :open="!!detail" title="Question Detail" :width="620" @close="detail = null">
       <template v-if="detail">
         <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px">
-          <QFBadge variant="cyan">{{ detail.subject }}</QFBadge>
+          <QFBadge variant="cyan">
+            {{ detail.subject }}<template v-if="detail.subjectName"> – {{ detail.subjectName }}</template>
+          </QFBadge>
           <QFBadge v-for="u in detail.units" :key="u.id" variant="neutral">{{ u.name }}</QFBadge>
           <QFBadge variant="neutral">{{ detail.type }}</QFBadge>
           <QFBadge variant="indigo">{{ detail.marks }} marks</QFBadge>
+          <QFBadge v-if="detail.examYear" variant="neutral">Year {{ detail.examYear }}</QFBadge>
         </div>
 
         <div

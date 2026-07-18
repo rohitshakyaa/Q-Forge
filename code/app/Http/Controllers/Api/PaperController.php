@@ -10,6 +10,7 @@ use App\Models\Question;
 use App\Services\Export\PaperWordBuilder;
 use App\Services\PaperGeneration\PaperGenerator;
 use App\Services\PaperGeneration\Support\GenerationResult;
+use App\Services\PaperGeneration\VectorSimilarityGuard;
 use App\Services\PaperGeneration\Support\PaperViewModel;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -24,58 +25,116 @@ class PaperController extends Controller
     }
 
     /**
-     * Run the deterministic generation engine for a teacher-owned blueprint.
+     * Run the generation engine for a teacher-owned blueprint and return a
+     * **preview** — nothing is persisted here. Seed-parameterised (a fresh random
+     * seed per run varies the paper; a client-supplied seed reproduces one) with
+     * within-paper semantic dedup — see PaperGenerator.
      *
-     * Success → persist a draft paper + paper_questions (used_count is NOT
-     * incremented here; that is deferred to Save in M3) and return the paper
-     * with an all-green constraint checklist. Infeasible → return the
-     * best-effort partial paper plus missing_slots, persisting nothing.
+     * The response carries the `seed` + `blueprint_id` so the client can hand
+     * them back to `store()` (Save) to persist the exact same paper. Because the
+     * engine is deterministic given its seed, Save re-generates rather than
+     * round-tripping the selection. Infeasible → best-effort partial paper plus
+     * missing_slots. Either way `used_count`, `last_used_at`, and history are
+     * untouched until the teacher explicitly saves.
      */
     public function generate(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'blueprint_id' => ['required', 'integer', 'exists:blueprints,id'],
+            // Optional: pin the run to reproduce a specific paper. Omitted on a
+            // normal "generate"/"regenerate", so each run draws a fresh variant.
+            'seed' => ['sometimes', 'integer', 'min:0'],
         ]);
 
         $blueprint = Blueprint::with('subject')->findOrFail($validated['blueprint_id']);
         abort_unless($blueprint->owner_id === $request->user()->id, 403, 'This blueprint belongs to another user.');
 
-        $result = $this->generator->generate($blueprint);
+        // A fresh random seed per run varies the paper across regenerations and
+        // between teachers; a client may pass its own to reproduce one exactly.
+        $seed = $validated['seed'] ?? random_int(0, PHP_INT_MAX);
+
+        $result = $this->generator->generate(
+            $blueprint,
+            $seed,
+            app(VectorSimilarityGuard::class),
+        );
 
         if (! $result->satisfiable) {
             return response()->json([
                 'satisfiable' => false,
+                'seed' => $seed,
+                'blueprint_id' => $blueprint->id,
                 // AI bank expansion adds questions, not slots, so it can only help when
                 // the shortfall is about bank contents — never when coverage needs more
                 // units than the blueprint has questions.
                 'expandable' => ! $result->coverageStructurallyInfeasible(),
                 'shortfall_reason' => $result->coverageDeficitMessage(),
-                'paper' => $this->partialPaperPayload($blueprint, $result),
+                'paper' => $this->previewPaperPayload($blueprint, $result),
                 'missing_slots' => $result->missingSlotsArray(),
                 'constraint_results' => $result->constraintResultsArray(),
             ]);
         }
 
-        $paper = $this->persist($blueprint, $result);
-
         return response()->json([
             'satisfiable' => true,
-            'paper' => $this->paperPayload($paper, $result),
+            // Echoed so the client can pass them back to Save to persist this exact paper.
+            'seed' => $seed,
+            'blueprint_id' => $blueprint->id,
+            'paper' => $this->previewPaperPayload($blueprint, $result),
             'constraint_results' => $result->constraintResultsArray(),
         ]);
     }
 
-    private function persist(Blueprint $blueprint, GenerationResult $result): Paper
+    /**
+     * Save a previewed paper (POST /papers). Re-generates deterministically from
+     * the preview's seed and persists it as a kept paper. The engine is a pure
+     * function of (blueprint, seed, bank), so the saved paper matches the preview
+     * unless the bank changed in between — in which case we refuse and ask for a
+     * regenerate rather than persist a paper the teacher never saw.
+     */
+    public function store(Request $request): JsonResponse
     {
-        return DB::transaction(function () use ($blueprint, $result) {
+        $validated = $request->validate([
+            'blueprint_id' => ['required', 'integer', 'exists:blueprints,id'],
+            'seed' => ['required', 'integer', 'min:0'],
+            'name' => ['sometimes', 'string', 'max:255'],
+        ]);
+
+        $blueprint = Blueprint::with('subject')->findOrFail($validated['blueprint_id']);
+        abort_unless($blueprint->owner_id === $request->user()->id, 403, 'This blueprint belongs to another user.');
+
+        $result = $this->generator->generate(
+            $blueprint,
+            $validated['seed'],
+            app(VectorSimilarityGuard::class),
+        );
+
+        abort_unless(
+            $result->satisfiable,
+            422,
+            'This paper can no longer be generated from the current question bank — please regenerate.',
+        );
+
+        $paper = $this->persist($blueprint, $result, $validated['name'] ?? null);
+
+        return response()->json([
+            'paper' => $this->paperPayload($paper, $result),
+        ], 201);
+    }
+
+    private function persist(Blueprint $blueprint, GenerationResult $result, ?string $name = null): Paper
+    {
+        return DB::transaction(function () use ($blueprint, $result, $name) {
             $paper = Paper::create([
                 'owner_id' => $blueprint->owner_id,
                 'blueprint_id' => $blueprint->id,
                 'subject_id' => $blueprint->subject_id,
-                'name' => $blueprint->name,
+                'name' => $name ?? $blueprint->name,
                 'total_marks' => $blueprint->total_marks,
                 'duration' => $blueprint->duration,
-                'status' => 'draft',
+                // Persisted only on an explicit Save, so it goes straight to
+                // 'saved' — there is no auto-created 'draft' any more.
+                'status' => 'saved',
                 'export_count' => 0,
                 'generated_at' => now(),
             ]);
@@ -149,8 +208,12 @@ class PaperController extends Controller
         ];
     }
 
-    /** Shape an unpersisted, best-effort partial paper for the infeasible response. */
-    private function partialPaperPayload(Blueprint $blueprint, GenerationResult $result): array
+    /**
+     * Shape an unpersisted paper — the generate preview (whether fully satisfiable
+     * or a best-effort partial). `id: null` marks it as not-yet-saved; the client
+     * pairs it with the response's `seed` to Save it.
+     */
+    private function previewPaperPayload(Blueprint $blueprint, GenerationResult $result): array
     {
         return [
             'id' => null,
@@ -205,14 +268,14 @@ class PaperController extends Controller
         return response()->json(['paper' => PaperViewModel::for($paper)->toArray()]);
     }
 
-    /** Rename and/or mark a draft as saved. */
+    /** Rename a saved paper. (Papers persist as 'saved' on Save, so there is no
+     *  draft→saved transition to perform here any more.) */
     public function update(Request $request, Paper $paper): JsonResponse
     {
         $this->authorizeOwner($request, $paper);
 
         $validated = $request->validate([
-            'name' => ['sometimes', 'string', 'max:255'],
-            'status' => ['sometimes', 'in:saved'],
+            'name' => ['required', 'string', 'max:255'],
         ]);
 
         $paper->fill($validated)->save();

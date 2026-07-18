@@ -85,6 +85,9 @@ interface ApiPaper {
 
 interface GenerateResponse {
   satisfiable: boolean;
+  // seed + blueprint_id let Save re-generate this exact paper deterministically.
+  seed: number;
+  blueprint_id: number;
   expandable?: boolean;
   shortfall_reason?: string | null;
   paper: ApiPaper;
@@ -142,6 +145,12 @@ export const usePapersStore = defineStore('papers', () => {
   const missingSlots = ref<MissingSlot[]>([]);
   const error = ref<string | null>(null);
 
+  // The current preview's seed + blueprint, handed back to Save so the server
+  // re-generates the exact same paper deterministically. Null until a preview.
+  const previewSeed = ref<number | null>(null);
+  const previewBlueprintId = ref<number | null>(null);
+  const saving = ref(false);
+
   // M5 — AI bank expansion progress for the Generate screen. `expandable` is false
   // when the shortfall is structural (coverage needs more units than there are
   // questions), where AI can't help; `shortfallReason` carries the explanation.
@@ -162,9 +171,11 @@ export const usePapersStore = defineStore('papers', () => {
   };
 
   /**
-   * Run the real generation engine. On a satisfiable blueprint the persisted
-   * draft paper is stored and returned; on an infeasible one we keep the
-   * best-effort partial plus the missing-slot shortfall for the UI to render.
+   * Run the real generation engine — a **preview** only, nothing is persisted.
+   * The satisfiable paper (or best-effort partial + shortfall) is held in
+   * `current` with a null id and is NOT added to history; the teacher persists
+   * it later via savePaper(). The preview's seed + blueprint are stashed so Save
+   * can reproduce it exactly.
    */
   async function generate(blueprintId: number): Promise<boolean> {
     generating.value = true;
@@ -172,23 +183,22 @@ export const usePapersStore = defineStore('papers', () => {
     satisfiable.value = null;
     constraints.value = [];
     missingSlots.value = [];
+    previewSeed.value = null;
+    previewBlueprintId.value = null;
 
     try {
       const { data } = await api.post<GenerateResponse>('/papers/generate', {
         blueprint_id: blueprintId,
       });
 
-      const paper = mapPaper(data.paper);
-      current.value = paper;
+      current.value = mapPaper(data.paper);
       constraints.value = data.constraint_results ?? [];
       missingSlots.value = data.missing_slots ?? [];
       satisfiable.value = data.satisfiable;
       expandable.value = data.expandable ?? true;
       shortfallReason.value = data.shortfall_reason ?? null;
-
-      if (data.satisfiable && paper.id !== null) {
-        items.value = [paper, ...items.value.filter((p) => p.id !== paper.id)];
-      }
+      previewSeed.value = data.seed;
+      previewBlueprintId.value = data.blueprint_id;
 
       return data.satisfiable;
     } catch (e) {
@@ -197,6 +207,36 @@ export const usePapersStore = defineStore('papers', () => {
       return false;
     } finally {
       generating.value = false;
+    }
+  }
+
+  /**
+   * Persist the current preview (Save). Re-generates server-side from the stashed
+   * seed, so the saved paper matches what was previewed. Returns the new paper id
+   * (now in history), or null on failure.
+   */
+  async function savePaper(name?: string): Promise<number | null> {
+    if (previewSeed.value === null || previewBlueprintId.value === null) return null;
+
+    saving.value = true;
+    error.value = null;
+    try {
+      const { data } = await api.post<{ paper: ApiPaper }>('/papers', {
+        blueprint_id: previewBlueprintId.value,
+        seed: previewSeed.value,
+        ...(name ? { name } : {}),
+      });
+
+      const paper = mapPaper(data.paper);
+      current.value = paper;
+      if (paper.id !== null) cache(paper);
+
+      return paper.id;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Save failed';
+      return null;
+    } finally {
+      saving.value = false;
     }
   }
 
@@ -211,6 +251,8 @@ export const usePapersStore = defineStore('papers', () => {
     expandStatus.value = null;
     expandable.value = true;
     shortfallReason.value = null;
+    previewSeed.value = null;
+    previewBlueprintId.value = null;
   };
 
   /**
@@ -347,7 +389,8 @@ export const usePapersStore = defineStore('papers', () => {
   }
 
   /** Rename a paper or mark it saved; refreshes the cached copy. */
-  async function update(id: number, payload: { name?: string; status?: 'saved' }): Promise<void> {
+  // Rename only — papers persist as 'saved' on Save, so there is no status flip.
+  async function update(id: number, payload: { name: string }): Promise<void> {
     const { data } = await api.patch<{ paper: ApiPaper }>(`/papers/${id}`, payload);
     const paper = mapPaper(data.paper);
     current.value = paper;
@@ -397,7 +440,9 @@ export const usePapersStore = defineStore('papers', () => {
     expandStatus,
     expandable,
     shortfallReason,
+    saving,
     generate,
+    savePaper,
     expandBank,
     resetGeneration,
     fetchHistory,

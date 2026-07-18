@@ -200,13 +200,13 @@ const exclusionRules = [
     key: 'lastNPapers' as const,
   },
   {
-    label: 'Usage Frequency Limit',
-    desc: 'Deprioritize questions used more than N times',
-    min: 1,
+    label: 'Exclude Recent Exam Years',
+    desc: "Drop questions whose exam year is within the last N years (0 = off). Uses each question's uploaded exam year; questions without one are always eligible.",
+    min: 0,
     max: 10,
-    unit: 'times',
+    unit: 'years',
     color: 'var(--indigo)',
-    key: 'reuseThreshold' as const,
+    key: 'excludeExamYearsBack' as const,
   },
 ];
 </script>
@@ -568,29 +568,6 @@ const exclusionRules = [
                 >{{ bp.exclusionRules[r.key] }}</div>
                 <span style="color: var(--text3); font-size: 13px">{{ r.unit }}</span>
               </div>
-            </div>
-            <div
-              v-for="[id, lbl] in [
-                ['strictUnits2', 'Strict unit proportionality across required units'],
-              ]"
-              :key="id"
-              style="
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                padding: 12px 14px;
-                background: var(--bg2);
-                border-radius: var(--radius);
-                border: 1px solid var(--border);
-              "
-            >
-              <input
-                :id="id"
-                type="checkbox"
-                checked
-                style="width: 16px; height: 16px; accent-color: var(--cyan)"
-              />
-              <label :for="id" style="cursor: pointer; font-size: 13.5px; font-weight: 500">{{ lbl }}</label>
             </div>
           </div>
         </div>

@@ -32,6 +32,10 @@ class BlueprintRequest extends FormRequest
             'definition.unitRules' => [$required, 'array'],
             'definition.unitAllocations' => [$required, 'array'],
             'definition.exclusionRules' => [$required, 'array'],
+            // Repetition levers (both optional, 0 = off): the cross-paper window
+            // and the exam-year window ("don't reuse the last N years' questions").
+            'definition.exclusionRules.lastNPapers' => ['sometimes', 'integer', 'min:0'],
+            'definition.exclusionRules.excludeExamYearsBack' => ['sometimes', 'integer', 'min:0'],
         ];
     }
 }

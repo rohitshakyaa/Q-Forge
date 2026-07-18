@@ -31,6 +31,9 @@ class CompiledBlueprint
         public readonly array $unitNames,
         public readonly array $unitCaps,
         public readonly int $lastNPapers,
+        // Exclude questions whose provenance year (attributes.exam_year) falls in
+        // the last N years before the current one; 0 = off. See PaperGenerator.
+        public readonly int $excludeExamYearsBack = 0,
     ) {
     }
 

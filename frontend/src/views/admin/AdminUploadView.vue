@@ -6,7 +6,6 @@ import {
   QFBadge,
   QFButton,
   QFCard,
-  QFInput,
   QFPageHeader,
   QFProgress,
   QFSelect,
@@ -30,6 +29,21 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const typeOptions = [
   { value: 'past_paper', label: 'Past paper' },
   { value: 'syllabus', label: 'Syllabus' },
+];
+
+// Exam year is optional provenance metadata (stored on each extracted question's
+// attributes.exam_year). A fixed dropdown of Gregorian years keeps the value
+// consistent — free text let "2023", "2023 AD", "2022/23" all mean one year,
+// which breaks any later year-based filtering or exclusion. Newest first; the
+// blank option means "not specified".
+const currentYear = new Date().getFullYear();
+const yearOptions = [
+  { value: '', label: 'Year (optional)' },
+  ...Array.from({ length: 30 }, (_, i) => {
+    const y = String(currentYear - i);
+
+    return { value: y, label: y };
+  }),
 ];
 
 const subjectOptions = computed(() =>
@@ -144,7 +158,7 @@ onUnmounted(() => extraction.stopAllWatching());
             />
           </div>
           <div class="md:flex-1">
-            <QFInput v-model="examYear" label="Exam year" placeholder="e.g. 2023" />
+            <QFSelect v-model="examYear" label="Exam year" :options="yearOptions" />
           </div>
         </div>
 

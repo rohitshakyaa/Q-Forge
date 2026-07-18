@@ -18,6 +18,15 @@ class PastPaperApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    /** Generate a preview then Save it (generate no longer persists on its own). */
+    private function generateAndSave(int $blueprintId): void
+    {
+        $seed = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprintId])
+            ->assertOk()->assertJsonPath('satisfiable', true)->json('seed');
+        $this->postJson('/api/papers', ['blueprint_id' => $blueprintId, 'seed' => $seed])
+            ->assertCreated();
+    }
+
     /** A teacher-owned blueprint for one short/4 section over $unitName, with the cross-paper window on. */
     private function blueprintFor(User $owner, Subject $subject, string $unitName, int $count, int $lastN): Blueprint
     {
@@ -149,8 +158,7 @@ class PastPaperApiTest extends TestCase
         foreach ([$teacherA, $teacherB] as $teacher) {
             $blueprint = $this->blueprintFor($teacher, $subject, 'Unit 1', 3, 1);
             Sanctum::actingAs($teacher);
-            $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
-                ->assertOk()->assertJsonPath('satisfiable', true);
+            $this->generateAndSave($blueprint->id);
 
             $this->assertNotContains($importedId, $this->generatedQuestionIds($teacher),
                 'A generated paper reused a question from an imported past exam.');

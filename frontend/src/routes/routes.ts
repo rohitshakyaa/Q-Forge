@@ -91,6 +91,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/teacher/TeacherGenerateView.vue'),
       },
       {
+        // The unsaved generate preview (held in the papers store, no id yet).
+        // Registered before paper/:id so "preview" isn't parsed as an id.
+        path: 'paper/preview',
+        name: 'teacher-paper-preview',
+        component: () => import('../views/teacher/PaperView.vue'),
+      },
+      {
         path: 'paper/:id',
         name: 'teacher-paper-view',
         component: () => import('../views/teacher/PaperView.vue'),

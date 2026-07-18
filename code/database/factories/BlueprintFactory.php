@@ -32,7 +32,7 @@ class BlueprintFactory extends Factory
                 'unitAllocations' => [
                     'Unit 1' => [['marks' => 4, 'count' => 2], ['marks' => 10, 'count' => 1]],
                 ],
-                'exclusionRules' => ['lastNPapers' => 2, 'reuseThreshold' => 3],
+                'exclusionRules' => ['lastNPapers' => 2, 'excludeExamYearsBack' => 0],
             ],
             'last_used_at' => null,
         ];

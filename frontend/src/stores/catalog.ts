@@ -36,7 +36,10 @@ export interface Subject {
 
 export interface BankQuestion extends CatalogQuestion {
   subject: string; // subject code
+  subjectName: string; // subject name
   unit: string; // unit name
+  /** Source exam year, when the question was extracted from a past paper. */
+  examYear?: string | null;
 }
 
 export interface QuestionFilters {
@@ -83,9 +86,11 @@ interface ApiQuestion {
   source?: string;
   created_at?: string;
   subject_code?: string;
+  subject_name?: string;
   unit_name?: string;
   unit_ids?: number[];
   units?: { id: number; name: string }[];
+  attributes?: { exam_year?: string | null } | null;
 }
 interface ApiUnit {
   id: number;
@@ -234,7 +239,9 @@ export const useCatalogStore = defineStore('catalog', () => {
     questions.value = (data.data as ApiQuestion[]).map((q) => ({
       ...mapQuestion(q),
       subject: q.subject_code ?? '',
+      subjectName: q.subject_name ?? '',
       unit: q.unit_name ?? '',
+      examYear: q.attributes?.exam_year ?? null,
     }));
     questionMeta.value = {
       currentPage: data.meta.current_page,

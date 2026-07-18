@@ -37,12 +37,12 @@ class PaperGenerateTest extends TestCase
                 'sections' => $sectionDefs,
                 'unitRules' => $unitRules,
                 'unitAllocations' => [],
-                'exclusionRules' => ['lastNPapers' => 0, 'reuseThreshold' => 3],
+                'exclusionRules' => ['lastNPapers' => 0, 'excludeExamYearsBack' => 0],
             ],
         ]);
     }
 
-    public function test_generates_and_persists_a_draft_paper_without_bumping_used_count(): void
+    public function test_generate_returns_a_preview_and_persists_nothing(): void
     {
         $teacher = User::factory()->create(['role' => 'teacher']);
         $subject = Subject::factory()->create();
@@ -65,16 +65,82 @@ class PaperGenerateTest extends TestCase
         $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
             ->assertOk()
             ->assertJsonPath('satisfiable', true)
-            ->assertJsonPath('paper.status', 'draft')
+            // A preview: no id, and the seed + blueprint are echoed for Save.
+            ->assertJsonPath('paper.id', null)
+            ->assertJsonPath('blueprint_id', $blueprint->id)
+            ->assertJsonStructure(['seed'])
             ->assertJsonCount(3, 'paper.sections.0.questions')
             ->assertJsonPath('constraint_results.0.pass', true);
 
-        $this->assertSame(1, Paper::where('blueprint_id', $blueprint->id)->where('status', 'draft')->count());
-        $this->assertSame(3, Paper::first()->paperQuestions()->count());
-        // M3: the three chosen questions have their used_count bumped on persist.
+        // Nothing is persisted, nothing is used, the blueprint is untouched.
+        $this->assertSame(0, Paper::count());
+        $this->assertSame(0, Question::where('used_count', '>', 0)->count());
+        $this->assertNull($blueprint->fresh()->last_used_at);
+    }
+
+    public function test_saving_a_preview_persists_it_and_bumps_used_count(): void
+    {
+        $teacher = User::factory()->create(['role' => 'teacher']);
+        $subject = Subject::factory()->create();
+        $units = collect(['Unit 1', 'Unit 2', 'Unit 3'])->map(
+            fn ($name, $i) => Unit::factory()->for($subject)->create(['name' => $name, 'position' => $i + 1])
+        );
+        foreach ($units as $unit) {
+            Question::factory()->count(2)->create([
+                'subject_id' => $subject->id, 'unit_id' => $unit->id,
+                'type' => 'short', 'marks' => 4, 'status' => 'approved', 'used_count' => 0,
+            ]);
+        }
+
+        $blueprint = $this->blueprintFor($teacher, $subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 3, 'marksEach' => 4],
+        ], ['Unit 1', 'Unit 2', 'Unit 3'], 12);
+
+        Sanctum::actingAs($teacher);
+
+        // Preview first to obtain the seed.
+        $seed = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
+            ->assertOk()->json('seed');
+
+        // Save: re-generates deterministically from the seed and persists.
+        $this->postJson('/api/papers', [
+            'blueprint_id' => $blueprint->id,
+            'seed' => $seed,
+            'name' => 'Midterm A',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('paper.status', 'saved')
+            ->assertJsonPath('paper.name', 'Midterm A');
+
+        $paper = Paper::sole();
+        $this->assertSame('saved', $paper->status);
+        $this->assertSame(3, $paper->paperQuestions()->count());
+        // used_count + last_used_at are bumped here — only on an explicit Save.
         $this->assertSame(3, Question::where('used_count', '>', 0)->count());
-        // Persisting a paper stamps the blueprint (the cards' "Last used" label).
         $this->assertNotNull($blueprint->fresh()->last_used_at);
+    }
+
+    public function test_saving_refuses_when_the_bank_can_no_longer_satisfy_the_seed(): void
+    {
+        $teacher = User::factory()->create(['role' => 'teacher']);
+        $subject = Subject::factory()->create();
+        $unit = Unit::factory()->for($subject)->create(['name' => 'Unit 1', 'position' => 1]);
+        Question::factory()->count(1)->create([
+            'subject_id' => $subject->id, 'unit_id' => $unit->id,
+            'type' => 'short', 'marks' => 4, 'status' => 'approved',
+        ]);
+
+        // Blueprint needs 2 questions but the bank has 1 → infeasible.
+        $blueprint = $this->blueprintFor($teacher, $subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 2, 'marksEach' => 4],
+        ], ['Unit 1'], 8);
+
+        Sanctum::actingAs($teacher);
+
+        $this->postJson('/api/papers', ['blueprint_id' => $blueprint->id, 'seed' => 123])
+            ->assertStatus(422);
+
+        $this->assertSame(0, Paper::count());
     }
 
     public function test_returns_missing_slots_and_persists_nothing_for_infeasible_blueprint(): void
