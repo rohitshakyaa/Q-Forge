@@ -1,0 +1,31 @@
+%% Figure 3.4 — Object diagram: a worked instance snapshot of one generated paper.
+%% QForge — object (instance) diagram (Chapter 3, §3.1.3).
+%% A single runtime snapshot: the CS301 "Standard Midterm" blueprint compiled into slots,
+%% and the concrete Question instances the generator selected into one saved Paper.
+%% Illustrative worked example consistent with the seeded demo (docs/MILESTONES.md M2/M3).
+flowchart TB
+    subj["cs301 : Subject<br/>code = &quot;CS301&quot;<br/>name = &quot;Data Structures&quot;"]
+
+    bp["midterm : Blueprint<br/>name = &quot;Standard Midterm&quot;<br/>total_marks = 40<br/>ai_assist = false"]
+
+    slotA["slotA : Slot<br/>type = &quot;long&quot;, marks = 10<br/>allowedUnits = &lbrace;U1,U2,U3&rbrace;"]
+    slotB["slotB : Slot<br/>type = &quot;short&quot;, marks = 5<br/>allowedUnits = &lbrace;U1,U2,U3&rbrace;"]
+
+    paper["paper : Paper<br/>status = &quot;saved&quot;<br/>origin = &quot;generated&quot;<br/>total_marks = 40"]
+
+    q17["q17 : Question<br/>type = &quot;long&quot;, marks = 10<br/>unit = U2, status = &quot;approved&quot;"]
+    q42["q42 : Question<br/>type = &quot;short&quot;, marks = 5<br/>unit = U3, status = &quot;approved&quot;"]
+
+    pq1["pq1 : PaperQuestion<br/>display_no = 1, section = &quot;A&quot;<br/>marks = 10, is_ai = false"]
+    pq2["pq2 : PaperQuestion<br/>display_no = 2, section = &quot;B&quot;<br/>marks = 5, is_ai = false"]
+
+    bp -->|targets| subj
+    bp -->|compiled into| slotA
+    bp -->|compiled into| slotB
+    bp -->|generates| paper
+    slotA -.->|filled by| q17
+    slotB -.->|filled by| q42
+    paper -->|contains| pq1
+    paper -->|contains| pq2
+    pq1 -->|snapshot of| q17
+    pq2 -->|snapshot of| q42

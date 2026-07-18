@@ -1,0 +1,39 @@
+%% Figure 3.9 — Sequence diagram: extracting question candidates from an uploaded document.
+%% QForge — PDF extraction sequence (Chapter 3, §3.1.3). Asynchronous via queue.
+%% Copied from docs/diagrams/seq-extract.mmd (canonical source unchanged); accurate to
+%% the M4 ProcessDocumentUpload flow.
+sequenceDiagram
+    actor A as Admin
+    participant FE as Frontend
+    participant API as Laravel API
+    participant Q as Redis/Horizon
+    participant JOB as ProcessDocumentUpload
+    participant PY as Python /extract
+    participant DB as MySQL
+
+    A->>FE: Upload past-paper PDF (+ subject, type)
+    FE->>API: POST /uploads (multipart)
+    API->>DB: create document_uploads (status=uploaded)
+    API->>Q: dispatch ProcessDocumentUpload
+    API-->>FE: 202 { id, status }
+    loop poll
+        FE->>API: GET /uploads/{id}
+        API-->>FE: { status, progress }
+    end
+    Q->>JOB: process
+    JOB->>DB: status=processing
+    JOB->>PY: POST /extract { stored_path, type }
+    PY->>PY: pdfplumber/pypdf text
+    alt page has little/no text
+        PY->>PY: Tesseract OCR fallback
+    end
+    PY->>PY: heuristic parser -> candidates (marks/type/unit?)
+    PY-->>JOB: { status, data: candidates[] }
+    JOB->>DB: insert QUESTIONS (source=extracted, status=pending)
+    JOB->>DB: status=parsed
+    A->>FE: Open Extraction Review Queue
+    FE->>API: GET /questions?status=pending
+    API-->>FE: pending candidates
+    A->>FE: Approve / reject
+    FE->>API: POST /questions/{id}/approve
+    API->>DB: status=approved (now usable by generator)

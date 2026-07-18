@@ -1,0 +1,40 @@
+%% Figure 4.6 — Component diagram. Adapted from docs/diagrams/architecture.mmd.
+%% Communication rule: Frontend -> Laravel -> Python -> Laravel -> Frontend.
+flowchart LR
+    subgraph Client["Presentation tier"]
+        FE["Vue 3 + Pinia SPA<br/>(axios to /api)"]
+    end
+
+    subgraph Core["Laravel - orchestrator (owns DB, business logic, algorithm)"]
+        API["REST API<br/>Sanctum auth + role middleware"]
+        ALGO["PaperGeneration service<br/>greedy + backtracking (pure PHP)"]
+        JOBS["Queued Jobs<br/>ProcessDocumentUpload / ExpandQuestionBank"]
+        RAG["Rag services<br/>ContentIndexer / DuplicateDetector /<br/>VectorSimilarityGuard"]
+    end
+
+    subgraph Proc["Python service (FastAPI) - processing only"]
+        EXTRACT["/extract<br/>pdfplumber/pypdf + Tesseract OCR + parser"]
+        GEN["/generate-questions<br/>LLMProvider"]
+        EMBED["/embed<br/>embedding model"]
+    end
+
+    OLLAMA["Ollama<br/>local LLM + embedding model"]
+    DB[("MySQL<br/>source of truth")]
+    REDIS[("Redis<br/>queue + cache")]
+    QDRANT[("Qdrant<br/>vector index")]
+
+    FE -->|"REST /api/*"| API
+    API --> ALGO
+    API <-->|"Eloquent"| DB
+    ALGO <-->|"read bank"| DB
+    ALGO -.->|"prefer non-duplicates"| RAG
+    API -->|"dispatch"| JOBS
+    JOBS <-->|"queue"| REDIS
+    RAG <-->|"REST 6333"| QDRANT
+    JOBS -->|"config(services.python)"| EXTRACT
+    JOBS -->|"config(services.python)"| GEN
+    RAG -->|"embed text"| EMBED
+    GEN -->|"REST"| OLLAMA
+    EMBED -->|"REST"| OLLAMA
+    EXTRACT -.->|"structured JSON"| JOBS
+    GEN -.->|"structured JSON"| JOBS

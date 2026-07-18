@@ -1,0 +1,90 @@
+%% Figure 3.3 — Analysis-level class diagram of the QForge problem domain.
+%% QForge — analysis-level class diagram (Chapter 3, §3.1.3).
+%% Problem-domain entities + relationships only — no service classes, no methods
+%% (those are refined in Chapter 4). Reconciled against code/app/Models/ and
+%% docs/diagrams/m6-schema.mmd. ContentChunk (M6 retrieval index) is a persistence
+%% concern, deferred to the Chapter 4 design/persistence view.
+classDiagram
+    class User {
+        +int id
+        +string name
+        +string email
+        +enum role  &lpar;admin | teacher&rpar;
+    }
+    class Subject {
+        +int id
+        +string code  &lpar;unique route key&rpar;
+        +string name
+        +string description
+        +markdown syllabus
+    }
+    class Unit {
+        +int id
+        +string name
+        +int position
+        +int hours
+        +markdown content
+    }
+    class Question {
+        +int id
+        +enum type  &lpar;short | long | mcq&rpar;
+        +int marks
+        +enum difficulty  &lpar;easy | medium | hard&rpar;
+        +text text
+        +enum source  &lpar;extracted | ai | manual&rpar;
+        +enum status  &lpar;pending | approved | rejected&rpar;
+        +json attributes
+        +int used_count
+    }
+    class Blueprint {
+        +int id
+        +string name
+        +int total_marks
+        +int duration
+        +bool ai_assist
+        +json definition  &lpar;sections / unitRules / unitAllocations / exclusionRules&rpar;
+        +datetime last_used_at
+    }
+    class Paper {
+        +int id
+        +string name
+        +int total_marks
+        +int duration
+        +enum origin  &lpar;generated | imported&rpar;
+        +enum status  &lpar;draft | saved | exported&rpar;
+        +int export_count
+        +datetime generated_at
+    }
+    class PaperQuestion {
+        +string section_label
+        +int display_no
+        +int marks
+        +bool is_ai
+    }
+    class DocumentUpload {
+        +int id
+        +enum type  &lpar;syllabus | past_paper&rpar;
+        +string original_filename
+        +string stored_path
+        +enum status  &lpar;uploaded | processing | parsed | failed&rpar;
+        +text error
+        +json meta
+    }
+
+    User "1" --> "0..*" Blueprint : owns
+    User "1" --> "0..*" Paper : owns
+    User "1" --> "0..*" DocumentUpload : uploads
+
+    Subject "1" --> "0..*" Unit : has
+    Subject "1" --> "0..*" Question : scopes
+    Subject "1" --> "0..*" Blueprint : targets
+    Subject "1" --> "0..*" Paper : for
+    Subject "1" --> "0..*" DocumentUpload : for
+
+    Unit "1" --> "0..*" Question : primary unit
+    Question "0..*" -- "1..*" Unit : tagged (question_unit)
+
+    Blueprint "1" --> "0..*" Paper : generates
+    Paper "1" *-- "0..*" PaperQuestion : contains
+    Question "1" --> "0..*" PaperQuestion : appears in
+    Unit "1" --> "0..*" PaperQuestion : labels

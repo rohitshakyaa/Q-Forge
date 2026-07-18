@@ -1,0 +1,25 @@
+%% Figure 3.2 — Project schedule: the algorithm-first milestone sequence (M1–M6).
+%% QForge — project schedule Gantt (Chapter 3, §3.1.2 Feasibility).
+%% Milestone ORDER is real (algorithm-first M1..M6, docs/MILESTONES.md Progress table).
+%% Calendar DATES are intentionally left as {{PLACEHOLDER}} tokens per the author's choice —
+%% fill each task's start date (and adjust durations) before rendering/export. Until then
+%% this source is a structural placeholder and will not render as a valid Gantt.
+gantt
+    title QForge Build Schedule (Milestone-first, M1–M6)
+    dateFormat YYYY-MM-DD
+    axisFormat %b %Y
+
+    section Foundation
+    M1 Domain foundation (schema, CRUD, roles)      :m1, {{PLACEHOLDER:M1_START}}, {{PLACEHOLDER:M1_DAYS}}d
+
+    section Algorithm (centrepiece)
+    M2 Generation engine (greedy + backtracking)    :m2, {{PLACEHOLDER:M2_START}}, {{PLACEHOLDER:M2_DAYS}}d
+    M3 Papers lifecycle + export + repetition       :m3, {{PLACEHOLDER:M3_START}}, {{PLACEHOLDER:M3_DAYS}}d
+
+    section Ingestion
+    M4 PDF extraction pipeline (OCR fallback)       :m4, {{PLACEHOLDER:M4_START}}, {{PLACEHOLDER:M4_DAYS}}d
+    M4.1 Syllabus import (subjects + units)         :m41, {{PLACEHOLDER:M41_START}}, {{PLACEHOLDER:M41_DAYS}}d
+
+    section AI augmentation
+    M5 AI bank expansion (Ollama top-up)            :m5, {{PLACEHOLDER:M5_START}}, {{PLACEHOLDER:M5_DAYS}}d
+    M6 RAG (embeddings, Qdrant, similarity guard)   :m6, {{PLACEHOLDER:M6_START}}, {{PLACEHOLDER:M6_DAYS}}d

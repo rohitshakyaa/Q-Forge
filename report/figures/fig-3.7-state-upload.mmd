@@ -1,0 +1,17 @@
+%% Figure 3.7 — State diagram: document_uploads processing lifecycle.
+%% QForge — document_uploads lifecycle state diagram (Chapter 3, §3.1.3).
+%% Reconciled against App\Models\DocumentUpload status constants
+%% (uploaded | processing | parsed | failed) and the async ProcessDocumentUpload job
+%% (docs/diagrams/seq-extract.mmd). parsed and failed are terminal (isTerminal()).
+stateDiagram-v2
+    [*] --> uploaded : POST /uploads (file stored)
+    uploaded --> processing : ProcessDocumentUpload picked up (Horizon)
+    processing --> parsed : Python /extract returns candidates
+    processing --> failed : extraction error
+    parsed --> [*]
+    failed --> [*]
+
+    note right of parsed
+        Candidates land as pending
+        questions for admin review.
+    end note

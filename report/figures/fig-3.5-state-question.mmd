@@ -1,0 +1,20 @@
+%% Figure 3.5 — State diagram: Question approval lifecycle.
+%% QForge — Question lifecycle state diagram (Chapter 3, §3.1.3).
+%% Reconciled against questions.status enum (pending|approved|rejected) and the
+%% source-dependent entry points in PLAN.md / MILESTONES.md:
+%%  - extracted candidates and manual drafts enter as `pending`;
+%%  - AI top-up questions are stored directly as `approved` (else the generator's
+%%    CandidateFilter, which selects status=approved only, could never use them);
+%%  - only `approved` questions are eligible for paper generation.
+stateDiagram-v2
+    [*] --> pending : extracted / manual create
+    [*] --> approved : AI top-up (source = ai)
+    pending --> approved : admin approves
+    pending --> rejected : admin rejects
+    approved --> [*] : deleted / re-extracted
+    rejected --> [*] : discarded
+
+    note right of approved
+        Only approved questions are
+        selectable by the generator.
+    end note

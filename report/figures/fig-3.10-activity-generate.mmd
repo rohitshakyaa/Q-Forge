@@ -1,0 +1,37 @@
+%% Figure 3.10 — Activity diagram: control flow of the paper-generation algorithm.
+%% QForge — generation algorithm control flow (Chapter 3, §3.1.3 activity diagram).
+%% Adapted from docs/diagrams/algorithm-m2.mmd (canonical source unchanged). The greedy ->
+%% validate -> backtrack -> shortfall control flow is the analysis-level view; the deep
+%% five-phase treatment (seed determinism, similarity guard, complexity) belongs to Ch4 §4.2.
+%% RECONCILIATION: the success tail returns an UNSAVED preview (Post-M6) — persistence
+%% happens only on a separate Save, so it is not part of the generate activity here.
+flowchart TD
+    A([POST /papers/generate · blueprint_id · seed?]) --> B[BlueprintCompiler:<br/>sections → ordered slots,<br/>unitRules → allowedUnitIds]
+
+    B --> C[/Greedy pass — for each slot in order/]
+    C --> D[CandidateFilter:<br/>approved · subject · type · marks<br/>∈ allowedUnits · exclude last-N + chosen<br/>· exclude recent exam years]
+    D --> E[GreedySelector:<br/>uncovered-unit-first, then LRU,<br/>then seeded tie-break;<br/>similarity guard prefers non-duplicates]
+    E --> F{More slots?}
+    F -- yes --> C
+
+    F -- no --> G[ConstraintValidator:<br/>counts · total marks · unit coverage ·<br/>unit maximums · no repetition]
+    G --> H{All slots filled<br/>AND all constraints pass?}
+
+    H -- yes --> S1([SUCCESS])
+
+    H -- no --> I[Build full candidate pool per slot]
+    I --> J[BacktrackingResolver:<br/>bounded DFS, uncovered-unit-first,<br/>distinct ids, coverage must hold]
+    J --> K{Valid assignment<br/>found?}
+
+    K -- yes --> G2[Re-validate selections] --> S1
+
+    K -- no --> L[computeMissingSlots:<br/>1 supply deficit = required − available<br/>2 else uncovered allowed units]
+    L --> F2([INFEASIBLE:<br/>best-effort partial + missing_slots])
+
+    S1 --> R1([200 · unsaved preview paper + seed + constraint_results])
+    F2 --> R2([200 · satisfiable:false ·<br/>partial paper + missing_slots + constraint_results])
+
+    classDef ok fill:#16351f,stroke:#3fae6b,color:#d7f5e3;
+    classDef bad fill:#3a1620,stroke:#d65a76,color:#f7d9e1;
+    class S1,R1 ok;
+    class F2,R2 bad;

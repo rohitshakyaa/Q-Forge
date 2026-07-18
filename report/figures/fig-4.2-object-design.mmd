@@ -1,0 +1,22 @@
+%% Figure 4.2 — Refined object diagram: the collaborating objects of one generation run.
+%% An instance-level snapshot of the PaperGeneration engine at design level.
+flowchart TB
+    pg["pg : PaperGenerator"]
+    comp["compiled : CompiledBlueprint<br/>slots = &lbrack;slot0, slot1, slot2&rbrack;<br/>allowedUnitIds = &lbrace;U1,U2,U3&rbrace;<br/>unitCaps = &lbrace;U2 : 1&rbrace;"]
+    guard["guard : VectorSimilarityGuard<br/>threshold = 0.90, broken = false"]
+    sel["selector : GreedySelector"]
+    res["result : GenerationResult<br/>satisfiable = true<br/>selections = &lbrace;0:q17, 1:q42, 2:q08&rbrace;"]
+    q17["q17 : Question<br/>U2, long, 10 marks"]
+    q42["q42 : Question<br/>U3, short, 5 marks"]
+    q08["q08 : Question<br/>U1, short, 5 marks"]
+
+    pg -->|compiles blueprint into| comp
+    pg -->|consults, greedy only| guard
+    pg -->|delegates pick per slot| sel
+    sel -->|slot 0| q17
+    sel -->|slot 1| q42
+    sel -->|slot 2| q08
+    pg -->|returns| res
+    res -.->|selection 0| q17
+    res -.->|selection 1| q42
+    res -.->|selection 2| q08

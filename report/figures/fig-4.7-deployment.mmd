@@ -1,0 +1,34 @@
+%% Figure 4.7 — Deployment diagram. Docker Compose topology from docker-compose.yml:
+%% containers on one bridge network, published host ports, and named volumes.
+flowchart TB
+    subgraph Host["Developer / institution host"]
+        subgraph Net["Docker network: local (bridge)"]
+            WEB["qforge_web<br/>nginx:alpine<br/>host :80"]
+            FRONT["qforge_frontend<br/>Vite dev server<br/>host :5173"]
+            APP["qforge_app<br/>PHP-FPM (Laravel)"]
+            WORKER["qforge_worker<br/>Horizon (supervisord)"]
+            PY["qforge_python<br/>FastAPI/uvicorn<br/>host :8000"]
+            OLLAMA["qforge_ollama<br/>ollama serve"]
+            QDRANT["qforge_qdrant<br/>host :6333"]
+            DB["qforge_db<br/>MySQL<br/>host :3306"]
+            REDIS["qforge_redis<br/>host :6379"]
+            MAIL["qforge_mailpit<br/>host :1025 / :8025"]
+        end
+
+        VDB[("volume<br/>qforge_db")]
+        VOL[("volume<br/>qforge_ollama")]
+        VQD[("volume<br/>qforge_qdrant")]
+    end
+
+    WEB --> APP
+    WEB --> FRONT
+    APP --> DB
+    APP --> REDIS
+    APP --> PY
+    APP --> QDRANT
+    WORKER --> REDIS
+    WORKER --> PY
+    PY --> OLLAMA
+    DB -. persists .- VDB
+    OLLAMA -. model cache .- VOL
+    QDRANT -. index storage .- VQD
