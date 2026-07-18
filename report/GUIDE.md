@@ -76,7 +76,7 @@ where the material lives in this repo.
 
 ### Front matter (`00-front-matter.md`) — roman numerals from `i`
 1. **Cover & Title Page** — project title, author(s), submission line to Dept/Campus, TU/IOST, date. `{{PLACEHOLDERS}}`.
-2. **Student's Declaration** — signed statement that the work is the authors' own and has not previously been presented to this or any other institution for assessment; per-author signature line with name + exam/roll number. Template text; names `{{PLACEHOLDER}}`, signatures inserted at print.
+2. **Student's Declaration** *(optional — not in the syllabus's prescribed content flow, p. 104; include only if the college requires it, as some do)* — signed statement that the work is the authors' own and has not previously been presented to this or any other institution for assessment; per-author signature line with name + exam/roll number. Template text; names `{{PLACEHOLDER}}`, signatures inserted at print.
 3. **Certificate Page** — (i) Supervisor's Recommendation, (ii) Approval Letter with signature blocks for Head/Coordinator, Supervisor, Internal Examiner, External Examiner. Template text; names `{{PLACEHOLDER}}`.
 4. **Acknowledgement** — brief, formal. `{{PLACEHOLDER}}` for named people.
 5. **Abstract** — ~250 words: problem (manual paper-setting), what QForge does (blueprint-driven constraint generation + optional AI top-up), the algorithm, tech stack, outcome. **[source]** VIVA-GUIDE §1 elevator pitch, PLAN.md Context.
@@ -101,6 +101,7 @@ where the material lives in this repo.
 - **3.1.2 Feasibility Analysis** — Technical (stack maturity), Operational (fits a college workflow), Economic (open-source, self-hosted Ollama — no per-call cost), Schedule (the M1–M6 timeline; include a **Gantt chart**). **[source]** MILESTONES progress; CONVENTIONS.md.
 - **3.1.3 Analysis (Object-Oriented)** — the OO models of the *problem*:
   - **Class diagram** (domain/analysis level) — entities & relationships. **[source]** PLAN.md Data Model + Eloquent models in `code/app/Models/`; ER sources `docs/diagrams/m6-schema.mmd` translated to classes.
+  - **Object diagram** — one instance-level snapshot of the class model (e.g. a concrete `Blueprint` with its `Slot` objects and selected `Question` instances for a sample paper). The syllabus (3.1.3) names *Class **and Object** Diagrams* explicitly, so include at least one. **[source]** a worked example from the generator's own output.
   - **State diagrams** — `Question` (pending→approved/rejected), `Paper` (draft→saved→exported), `document_uploads` (uploaded→processing→parsed/failed). **[source]** PLAN.md Data Model status enums.
   - **Sequence diagrams** — "generate a paper" and "extract from PDF". **[source]** `docs/diagrams/seq-generate.mmd`, `docs/diagrams/seq-extract.mmd`; VIVA-GUIDE §2 A-to-Z flow.
   - **Activity diagram** — the generation algorithm's control flow (greedy → validate → backtrack → shortfall). **[source]** Algorithm.md §6 flowchart (`docs/diagrams/algorithm-m2.mmd`).
@@ -108,7 +109,7 @@ where the material lives in this repo.
 ### Chapter 4 — System Design (`04-system-design.md`) — **Object-Oriented, refined**
 - **4.1 Design** — refinements of the Ch3 models to implementation level:
   - Refined **class diagram** with the `PaperGeneration` service classes (`BlueprintCompiler`, `CandidateFilter`, `GreedySelector`, `ConstraintValidator`, `BacktrackingResolver`, `PaperGenerator`, `SimilarityGuard`/`VectorSimilarityGuard`/`NullSimilarityGuard`, `Support/TieBreaker`). **[source]** `code/app/Services/PaperGeneration/`; PLAN.md "The Algorithm".
-  - Refined **sequence/activity** diagrams (add AI top-up path, RAG guard).
+  - Refined **object/state/sequence/activity** diagrams (add AI top-up path, RAG guard). The syllabus (4.1) lists *Refinement of Class, **Object**, State, Sequence and Activity diagrams* — carry the object-level snapshot through to the design level too.
   - **Component diagram** — Laravel (orchestrator) ↔ Python (processor) ↔ Vue (presentation) ↔ MySQL/Redis/Qdrant/Ollama. **[source]** `docs/diagrams/architecture.mmd`; CLAUDE.md Architecture Principles.
   - **Deployment diagram** — the Docker Compose topology (containers, networks, volumes, ports). **[source]** `docker-compose.yml`; CONVENTIONS.md.
   - **Database design** (persistence view under the OO design) — the relational schema and its normalization note. **[source]** `docs/diagrams/m6-schema.mmd`; migrations in `code/database/migrations/`.
@@ -139,6 +140,7 @@ Track each required diagram, its source, and status. Diagrams live as Mermaid wh
 |---|---|---|---|
 | Use case | 3.1.1 | derive from PLAN.md API + ROLES.md | to create |
 | Class (analysis) | 3.1.3 | `diagrams/m6-schema.mmd` + `code/app/Models/` | to create (translate ER→classes) |
+| Object (instance snapshot) | 3.1.3 / 4.1 | worked example from generator output | to create |
 | State (Question/Paper/Upload) | 3.1.3 | PLAN.md status enums | to create |
 | Sequence — generate | 3.1.3 / 4.1 | `diagrams/seq-generate.mmd` | **exists** |
 | Sequence — extract | 3.1.3 / 4.1 | `diagrams/seq-extract.mmd` | **exists** |

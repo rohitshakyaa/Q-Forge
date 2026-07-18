@@ -80,7 +80,21 @@ else
   warn "BulkQuestionSeeder skipped (not fatal)"
 fi
 
-# 9. Frontend deps are installed at image build time; confirm the dev server -
+# 9. RAG index -------------------------------------------------------------
+# setup-fresh wiped the Qdrant volume (step 3), so its collections are gone.
+# Build them from MySQL now: this creates the `questions` + `chunks`
+# collections and embeds the seeded bank in batched round-trips. Without it the
+# index is empty until the first manual reindex (sync jobs would rebuild
+# `questions` incrementally, but never `chunks`). Non-fatal — the app runs
+# without RAG, and the index is always rebuildable later.
+step "Building the RAG vector index (qforge:rag:reindex)"
+if app php artisan qforge:rag:reindex; then
+  ok "RAG index built"
+else
+  warn "RAG reindex skipped (not fatal — run 'php artisan qforge:rag:reindex' later)"
+fi
+
+# 10. Frontend deps are installed at image build time; confirm the dev server
 step "Caches"
 app php artisan optimize:clear >/dev/null 2>&1 || true
 ok "Laravel caches cleared"

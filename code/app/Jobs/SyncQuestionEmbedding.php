@@ -56,6 +56,13 @@ class SyncQuestionEmbedding implements ShouldQueue
 
         $embedded = $python->embed([$question->text]);
 
+        // The collection may not exist yet: Qdrant is a rebuildable index, so its
+        // volume can be wiped (setup-fresh) or lost independently of MySQL, and a
+        // question can be approved before any `qforge:rag:reindex` has created it.
+        // Ensuring here keeps this job self-sufficient — upserting into a missing
+        // collection 404s otherwise.
+        $qdrant->ensureCollection(QdrantClient::COLLECTION_QUESTIONS);
+
         $qdrant->upsert(QdrantClient::COLLECTION_QUESTIONS, [
             QuestionPoints::make($question, $embedded['embeddings'][0], $embedded['model']),
         ]);
