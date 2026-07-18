@@ -40,9 +40,17 @@ ensure_env "$PROJECT_ROOT/.env"          "$PROJECT_ROOT/.env.example"
 ensure_env "$PROJECT_ROOT/code/.env"     "$PROJECT_ROOT/code/.env.example"
 
 # 3. Clean slate -------------------------------------------------------------
-step "Tearing down any previous containers and volumes (fresh start)"
-dc down -v --remove-orphans || true
-ok "Clean slate"
+# "Fresh" means a clean DATABASE, not a wiped machine. We tear the stack down
+# WITHOUT -v (which would delete every named volume) and then remove only the
+# volumes setup-fresh is meant to reset: the database, and the Qdrant RAG index
+# (rebuildable via `artisan qforge:rag:reindex`). The multi-GB Ollama model
+# cache (qforge_ollama) is deliberately kept, so a fresh install does NOT
+# re-download qwen2.5 / nomic-embed-text every time.
+step "Tearing down previous containers (keeping the Ollama model cache)"
+dc down --remove-orphans || true
+prefix="$(name_prefix)"
+docker_cli volume rm -f "${prefix}db" "${prefix}qdrant" >/dev/null 2>&1 || true
+ok "Clean slate — DB + RAG index reset, models preserved"
 
 # 4. Build + start -----------------------------------------------------------
 step "Building images (no cache) and starting the stack"

@@ -49,6 +49,23 @@ detect_compose() {
 
 dc() { ( cd "$PROJECT_ROOT" && "${DC[@]}" "$@" ); }
 
+# Raw `docker` (not compose), matching whatever privilege detect_compose chose
+# for DC. Used for volume operations that compose can't do selectively.
+docker_cli() {
+  if [[ "${DC[0]:-}" == "sudo" ]]; then
+    ( cd "$PROJECT_ROOT" && sudo docker "$@" )
+  else
+    ( cd "$PROJECT_ROOT" && docker "$@" )
+  fi
+}
+
+# Container/volume name prefix (from .env `CONTAINER_NAME_PREFIX`, default qforge_).
+name_prefix() {
+  local p
+  p="$(grep -E '^CONTAINER_NAME_PREFIX=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2-)"
+  printf '%s' "${p:-qforge_}"
+}
+
 # Run a command inside the app container.
 app() { dc exec -T "$APP_SERVICE" "$@"; }
 
