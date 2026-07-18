@@ -180,6 +180,61 @@ the canonical `docs/diagrams/` source.
 
 ---
 
+## 5A. Paraphrasing discipline (apply *while* drafting — not as a later pass)
+
+Every section is written in the report's own formal voice from the first draft. Nothing is
+copy-pasted — not from external sources, and not from this repo's own docs. Two distinct obligations
+hide under the word "paraphrase"; keep them separate:
+
+- **External sources → paraphrase *and* cite `[n]`.** An academic-integrity obligation. Restate the
+  source's idea in genuinely new sentence structure and wording, keep its meaning intact, and attach
+  the IEEE citation. This governs Chapter 2 above all (and any cited claim elsewhere).
+- **QForge's own internal docs (PLAN.md, Algorithm.md, VIVA-GUIDE.md, MILESTONES.md, README, code
+  comments) → rewrite for register, no citation.** These are the *system being described*, not
+  literature (§6). They are informal, present-tense, sometimes marketing-toned and emoji-laden.
+  Transform them into formal, past/present report prose (§5.2). Pasting them verbatim is wrong on
+  voice *and* is self-duplication a similarity checker will flag against the repo.
+
+**What proper paraphrasing is** (both cases): change the *structure*, not just the words. Reorder the
+logic, merge or split sentences, switch voice (active↔passive), recast the grammar (a bullet list →
+prose, noun-heavy → verb-led). **Synonym-swapping on the original sentence skeleton is patchwriting**
+— checkers and examiners both catch it. Do not do it.
+
+**What is *never* paraphrased** (keep verbatim/exact):
+- Technical terms, class/method/service names, table/column names, tech-stack names — keep
+  *cosine similarity, FastAPI, Qdrant, `GreedySelector`, `paper_questions`* exactly. You paraphrase
+  the explanation *around* the term, never the term.
+- Direct quotations you deliberately choose to quote — those stay in quotation marks with a citation
+  and a page/section locator. Prefer paraphrase; quote only when the exact wording matters.
+- The syllabus's binding requirements when transcribed as spec (§3, §7). Those are structure, not
+  prose to reword.
+- QForge's fixed vocabulary from §5 rule 7 (*blueprint, slot, candidate, …*) — consistency beats
+  variation; do not "elegant-variation" these into synonyms.
+
+**Your original contribution is not paraphrase at all.** The algorithm, the architecture, the data
+model, the design decisions, the results — these are written fresh in your own voice with no source
+to restate. Most of the report is this.
+
+### Per-section paraphrasing mode
+
+| Report section | Mode | Notes |
+|---|---|---|
+| Abstract, Acknowledgement, Declaration | **Original** | Own synthesis of the built system; no external restatement. |
+| Ch1 Introduction (all of 1.1–1.6) | **Original** | Domain framing, problem, objectives, scope, methodology are the team's own. Rewrite VIVA-GUIDE/PLAN framing into formal prose (register), not copy. |
+| Ch2 §2.1 Background Study | **Paraphrase + cite** (heavy) | Every fundamental concept (CSP/greedy/backtracking, OCR, embeddings/SBERT, AIG) is restated in own words *and* carries its `[n]` from `references.md` [2]–[7]. No bare textbook definitions (§5 rule 1). |
+| Ch2 §2.2 Literature Review | **Paraphrase + cite** (heavy) | Reviews of prior systems [1] and any candidate sources — paraphrase each system's approach, never lift its abstract. Gaps → `{{CITATION NEEDED}}`. |
+| Ch3 System Analysis | **Original** | Requirements, use cases, OO models are the team's own analysis of QForge. Rewrite PLAN.md/ROLES.md into report prose (register). Cite only if a *method definition* leans on an external source. |
+| Ch4 System Design (incl. 4.2 Algorithm) | **Original** | The centerpiece — pure own-voice writing from `code/` + Algorithm.md, rewritten formally (register). Cite a source only for a borrowed *technique* (e.g. backtracking [6], greedy [7]) where a nod is warranted. |
+| Ch5 Implementation & Testing | **Original** | Describe the real modules and tests in own words; do not paste whole files (snippets → Appendix). Register-rewrite of code/VIVA-GUIDE. |
+| Ch6 Conclusion & Future Work | **Original** | Own reflection; VIVA-GUIDE weak points reframed in formal prose. |
+| Appendices | **Verbatim allowed** | Source snippets and screenshots are shown *as-is by design* — they are exhibits, not prose, so no paraphrase (and no similarity concern). |
+
+**Rule of thumb while drafting a section:** if the fact came from *outside* the repo, paraphrase it
+and cite it; if it came from *inside* the repo, rewrite it into formal report voice; if it is a name
+or a fixed term, leave it exact.
+
+---
+
 ## 6. Citation & referencing (IEEE)
 
 - In-text: bracketed numbers in order of first appearance, e.g. "… backtracking search [3]."
