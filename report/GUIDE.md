@@ -76,10 +76,11 @@ where the material lives in this repo.
 
 ### Front matter (`00-front-matter.md`) — roman numerals from `i`
 1. **Cover & Title Page** — project title, author(s), submission line to Dept/Campus, TU/IOST, date. `{{PLACEHOLDERS}}`.
-2. **Certificate Page** — (i) Supervisor's Recommendation, (ii) Approval Letter with signature blocks for Head/Coordinator, Supervisor, Internal Examiner, External Examiner. Template text; names `{{PLACEHOLDER}}`.
-3. **Acknowledgement** — brief, formal. `{{PLACEHOLDER}}` for named people.
-4. **Abstract** — ~250 words: problem (manual paper-setting), what QForge does (blueprint-driven constraint generation + optional AI top-up), the algorithm, tech stack, outcome. **[source]** VIVA-GUIDE §1 elevator pitch, PLAN.md Context.
-5. **Table of Contents**, **List of Abbreviations**, **List of Figures**, **List of Tables** — generated last, after content is stable.
+2. **Student's Declaration** — signed statement that the work is the authors' own and has not previously been presented to this or any other institution for assessment; per-author signature line with name + exam/roll number. Template text; names `{{PLACEHOLDER}}`, signatures inserted at print.
+3. **Certificate Page** — (i) Supervisor's Recommendation, (ii) Approval Letter with signature blocks for Head/Coordinator, Supervisor, Internal Examiner, External Examiner. Template text; names `{{PLACEHOLDER}}`.
+4. **Acknowledgement** — brief, formal. `{{PLACEHOLDER}}` for named people.
+5. **Abstract** — ~250 words: problem (manual paper-setting), what QForge does (blueprint-driven constraint generation + optional AI top-up), the algorithm, tech stack, outcome. **[source]** VIVA-GUIDE §1 elevator pitch, PLAN.md Context.
+6. **Table of Contents**, **List of Abbreviations**, **List of Figures**, **List of Tables** — generated last, after content is stable.
 
 ### Chapter 1 — Introduction (`01-introduction.md`)
 - **1.1 Introduction** — domain (exam question-paper preparation for TU-style courses), what QForge is. **[source]** PLAN.md Context; README.md; CLAUDE.md Project Overview.
