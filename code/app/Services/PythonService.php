@@ -80,16 +80,21 @@ class PythonService
      * echoed `model`/`dimensions` get stamped next to stored vectors so a model
      * swap makes stale (incomparable) vectors detectable.
      *
+     * `$task` is "document" for text being stored/indexed and "query" for text
+     * used to search — nomic-embed-text embeds the two differently, so a search
+     * must pass "query" to compare correctly against stored documents.
+     *
      * @param  string[]  $texts
+     * @param  'document'|'query'  $task
      * @return array{model: string, dimensions: int, embeddings: array<int, array<int, float>>}
      *
      * @throws RuntimeException when the service is unreachable or reports failure.
      */
-    public function embed(array $texts): array
+    public function embed(array $texts, string $task = 'document'): array
     {
         $response = $this->client()
             ->timeout((int) config('services.python.embed_timeout'))
-            ->post('/embed', ['texts' => array_values($texts)]);
+            ->post('/embed', ['texts' => array_values($texts), 'task' => $task]);
 
         if ($response->failed()) {
             throw new RuntimeException("python /embed returned HTTP {$response->status()}");

@@ -98,9 +98,14 @@ class GenerateQuestionsRequest(BaseModel):
 
 class EmbedRequest(BaseModel):
     """Input to `/embed` (M6 — RAG). Laravel sends texts; vectors come back in
-    input order. Batched: a re-index sends many texts per call, a dedup check one."""
+    input order. Batched: a re-index sends many texts per call, a dedup check one.
+
+    `task` tells an asymmetric embedder whether these are stored documents or
+    live search queries (nomic-embed-text uses different prefixes for each).
+    Defaults to "document" — the storing path is the common case."""
 
     texts: list[str] = Field(min_length=1, max_length=256)
+    task: Literal["query", "document"] = "document"
 
 
 class EmbedData(BaseModel):

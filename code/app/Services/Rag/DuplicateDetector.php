@@ -46,7 +46,10 @@ class DuplicateDetector
         }
 
         try {
-            return $this->python->embed($texts)['embeddings'];
+            // Dedup is symmetric — question vs question — so both sides use the
+            // same "document" space (measured: query/document asymmetry suppresses
+            // like-for-like scores; docs/RAG-GUIDE.md §2.1).
+            return $this->python->embed($texts, 'document')['embeddings'];
         } catch (\Throwable $e) {
             $this->broken = true; // Don't re-fail per candidate; this run degrades once.
             Log::warning('DuplicateDetector: embedding unavailable, falling back to text-only dedup', [

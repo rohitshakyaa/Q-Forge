@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue';
-import { defineStore } from 'pinia';
+import { acceptHMRUpdate, defineStore } from 'pinia';
 import api from '../api/client/axios';
 
 // ── Enum mapping: the backend stays canonical lowercase; the UI uses display labels.
@@ -56,6 +56,8 @@ export interface Upload {
   ocrPages: number | null;
   questionsCreated: number | null;
   questionsSkipped: number | null;
+  /** How many extracted candidates exactly matched an existing bank/queue question (now flagged, not skipped). */
+  questionsDuplicate: number | null;
   questionsUnlinked: number | null;
   /** Syllabus uploads only, and only from `GET /uploads/{id}`. */
   courses: Course[];
@@ -89,6 +91,11 @@ export interface Candidate {
   uploadId: number | null;
   /** M6: nearest approved lookalike found at extraction time (flag-only — the reviewer decides). */
   similar: SimilarQuestion | null;
+  /**
+   * Exact-text duplicates of existing approved/pending bank questions (flag-only —
+   * the reviewer approves or rejects). Independent of `similar`; empty when fresh.
+   */
+  duplicates: DuplicateMatch[];
   /** M6 Phase 3: ranked unit suggestions, best first. The top one may auto-assign (see autoAssigned). */
   suggestedUnits: SuggestedUnit[];
   /**
@@ -117,6 +124,13 @@ export interface SimilarQuestion {
   questionId: number;
   /** Cosine similarity in [0, 1]; ≥ the backend threshold (default 0.90). */
   score: number;
+}
+
+/** One entry of `attributes.duplicate_of` — an exact-text match in the existing bank/queue. */
+export interface DuplicateMatch {
+  questionId: number;
+  /** The matched question's status — only ever 'approved' or 'pending' (rejected is excluded from the pool). */
+  status: ReviewStatus;
 }
 
 export interface UnitOption {
@@ -160,6 +174,7 @@ interface ApiUpload {
   ocr_pages: number | null;
   questions_created: number | null;
   questions_skipped: number | null;
+  questions_duplicate: number | null;
   questions_unlinked: number | null;
   courses?: ApiCourse[];
   imported_subject_id: number | null;
@@ -209,6 +224,7 @@ const mapUpload = (u: ApiUpload): Upload => ({
   ocrPages: u.ocr_pages,
   questionsCreated: u.questions_created,
   questionsSkipped: u.questions_skipped,
+  questionsDuplicate: u.questions_duplicate,
   questionsUnlinked: u.questions_unlinked,
   // Only `GET /uploads/{id}` carries the proposal; the index omits it.
   courses: (u.courses ?? []).map(mapCourse),
@@ -219,6 +235,7 @@ const mapUpload = (u: ApiUpload): Upload => ({
 const mapCandidate = (q: ApiCandidate): Candidate => {
   const attrs = q.attributes ?? {};
   const similar = attrs.similar as { question_id?: number; score?: number } | undefined;
+  const duplicateOf = (attrs.duplicate_of as Array<{ question_id?: number; status?: ReviewStatus }> | undefined) ?? [];
   const suggested = (attrs.suggested_units as Array<{ unit_id?: number; score?: number }> | undefined) ?? [];
   const autoAssigned = attrs.unit_auto_assigned as { unit_id?: number; score?: number } | undefined;
 
@@ -242,6 +259,9 @@ const mapCandidate = (q: ApiCandidate): Candidate => {
       similar?.question_id != null && similar?.score != null
         ? { questionId: similar.question_id, score: similar.score }
         : null,
+    duplicates: duplicateOf
+      .filter((d) => d.question_id != null && d.status != null)
+      .map((d) => ({ questionId: d.question_id as number, status: d.status as ReviewStatus })),
     suggestedUnits: suggested
       .filter((s) => s.unit_id != null && s.score != null)
       .map((s) => ({ unitId: s.unit_id as number, score: s.score as number })),
@@ -445,6 +465,16 @@ export const useExtractionStore = defineStore('extraction', () => {
   }
 
   /**
+   * Fetch one question by id (the review queue only holds this upload's
+   * candidates, but a duplicate/similar flag can point at any bank question).
+   * Used to show the full text of a flagged lookalike on demand.
+   */
+  async function fetchQuestion(id: number): Promise<Candidate> {
+    const { data } = await api.get(`/questions/${id}`);
+    return mapCandidate(data.data as ApiCandidate);
+  }
+
+  /**
    * Saves an edit without changing the candidate's review status.
    * Unset unit/marks are omitted rather than sent as null: the questions endpoint
    * validates them as integers whenever they are present, and a candidate is
@@ -527,7 +557,15 @@ export const useExtractionStore = defineStore('extraction', () => {
     approve,
     reject,
     save,
+    fetchQuestion,
     bulkApprove,
     bulkReject,
   };
 });
+
+// Let Vite hot-apply edits to this store (new actions included) without a full
+// reload — otherwise the running instance keeps the old shape and a freshly
+// added action reads as undefined.
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useExtractionStore, import.meta.hot));
+}

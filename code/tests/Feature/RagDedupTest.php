@@ -38,7 +38,7 @@ class RagDedupTest extends TestCase
         Http::fake([
             'qforge_python:8000/embed' => Http::response([
                 'status' => 'success',
-                'data' => ['model' => 'nomic-embed-text', 'dimensions' => count($vectors[0] ?? [0]), 'embeddings' => $vectors],
+                'data' => ['model' => 'nomic-embed-text/prefixed', 'dimensions' => count($vectors[0] ?? [0]), 'embeddings' => $vectors],
                 'errors' => [],
             ]),
         ]);
@@ -134,7 +134,7 @@ class RagDedupTest extends TestCase
                 && $point['vector'] === [0.1, 0.2]
                 && $point['payload']['subject_id'] === $question->subject_id
                 && $point['payload']['unit_ids'] === [$unit->id]
-                && $point['payload']['embedding_model'] === 'nomic-embed-text';
+                && $point['payload']['embedding_model'] === 'nomic-embed-text/prefixed';
         });
     }
 
@@ -178,7 +178,7 @@ class RagDedupTest extends TestCase
             ]),
             'qforge_python:8000/embed' => Http::response([
                 'status' => 'success',
-                'data' => ['model' => 'nomic-embed-text', 'dimensions' => 3, 'embeddings' => $vectors],
+                'data' => ['model' => 'nomic-embed-text/prefixed', 'dimensions' => 3, 'embeddings' => $vectors],
                 'errors' => [],
             ]),
             // Phase 2: GroundingBuilder also searches this collection (semantic
@@ -321,6 +321,69 @@ class RagDedupTest extends TestCase
         ]);
 
         $this->assertArrayNotHasKey('similar', Question::where('source', 'extracted')->firstOrFail()->attributes ?? []);
+    }
+
+    // ---- exact-text duplicate flags (independent of embeddings) -----------------
+
+    public function test_exact_duplicate_of_an_approved_question_is_flagged_not_skipped(): void
+    {
+        [$subject, $unit] = $this->bank();
+        $existing = Question::factory()->create([
+            'subject_id' => $subject->id, 'unit_id' => $unit->id,
+            'status' => 'approved', 'source' => 'manual', 'text' => 'What is non-repudiation?',
+        ]);
+        $upload = DocumentUpload::factory()->create(['subject_id' => $subject->id]);
+
+        // RAG stays off (default) — this is the fingerprint path, no embeddings.
+        $counts = app(CandidateImporter::class)->import($upload, [
+            ['text' => 'What is non-repudiation?', 'type' => 'short', 'marks' => 5, 'unit_hint' => 'Unit 1'],
+        ]);
+
+        $this->assertSame(1, $counts['created']);
+        $this->assertSame(1, $counts['duplicate']);
+        $this->assertSame(0, $counts['skipped']);
+
+        $candidate = Question::where('source', 'extracted')->firstOrFail();
+        $this->assertSame('pending', $candidate->status); // flagged, never dropped
+        $this->assertSame(
+            [['question_id' => $existing->id, 'status' => 'approved']],
+            $candidate->attributes['duplicate_of'],
+        );
+    }
+
+    public function test_exact_duplicate_of_only_a_rejected_question_is_not_flagged(): void
+    {
+        [$subject, $unit] = $this->bank();
+        Question::factory()->create([
+            'subject_id' => $subject->id, 'unit_id' => $unit->id,
+            'status' => 'rejected', 'source' => 'manual', 'text' => 'Explain the SET protocol.',
+        ]);
+        $upload = DocumentUpload::factory()->create(['subject_id' => $subject->id]);
+
+        $counts = app(CandidateImporter::class)->import($upload, [
+            ['text' => 'Explain the SET protocol.', 'type' => 'short', 'marks' => 5, 'unit_hint' => 'Unit 1'],
+        ]);
+
+        // Rejected rows are excluded from the pool: the paper re-imports clean.
+        $this->assertSame(1, $counts['created']);
+        $this->assertSame(0, $counts['duplicate']);
+        $this->assertArrayNotHasKey('duplicate_of', Question::where('source', 'extracted')->firstOrFail()->attributes ?? []);
+    }
+
+    public function test_exact_repeat_within_one_upload_is_collapsed(): void
+    {
+        [$subject, $unit] = $this->bank();
+        $upload = DocumentUpload::factory()->create(['subject_id' => $subject->id]);
+
+        $counts = app(CandidateImporter::class)->import($upload, [
+            ['text' => 'Define page rank.', 'type' => 'short', 'marks' => 5, 'unit_hint' => 'Unit 1'],
+            ['text' => 'Define page rank.', 'type' => 'short', 'marks' => 5, 'unit_hint' => 'Unit 1'],
+        ]);
+
+        $this->assertSame(1, $counts['created']);
+        $this->assertSame(1, $counts['skipped']);   // the second copy, collapsed
+        $this->assertSame(0, $counts['duplicate']);  // nothing pre-existing to flag
+        $this->assertSame(1, Question::where('source', 'extracted')->count());
     }
 
     // ---- reindex ----------------------------------------------------------------

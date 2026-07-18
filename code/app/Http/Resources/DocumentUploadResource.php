@@ -29,6 +29,7 @@ class DocumentUploadResource extends JsonResource
             'ocr_pages' => $meta['ocr_pages'] ?? null,
             'questions_created' => $meta['questions_created'] ?? null,
             'questions_skipped' => $meta['questions_skipped'] ?? null,
+            'questions_duplicate' => $meta['questions_duplicate'] ?? null,
             'questions_unlinked' => $meta['questions_unlinked'] ?? null,
             // Syllabus uploads only. The proposal carries every unit's markdown body,
             // so keep it off the index and send it only when a single upload is asked for.

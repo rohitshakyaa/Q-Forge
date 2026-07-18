@@ -65,8 +65,12 @@ return [
         'timeout' => (int) env('QDRANT_TIMEOUT', 30),
 
         // Stored alongside every vector so a model swap makes stale vectors
-        // detectable (vectors from different models are incomparable).
-        'embedding_model' => env('RAG_EMBEDDING_MODEL', 'nomic-embed-text'),
+        // detectable (vectors from different models are incomparable). The
+        // "/prefixed" suffix marks the task-prefixed pipeline — vectors from the
+        // earlier prefix-less embedder are a different, incomparable map, so this
+        // must match the tag Python reports (OllamaEmbedder.model) and a bump
+        // requires `php artisan qforge:rag:reindex --fresh`.
+        'embedding_model' => env('RAG_EMBEDDING_MODEL', 'nomic-embed-text/prefixed'),
         'vector_size' => (int) env('RAG_VECTOR_SIZE', 768),
 
         // Cosine similarity at/above this counts as a near-duplicate (Phase 1).

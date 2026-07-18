@@ -89,6 +89,36 @@ Two properties matter for everything downstream:
   *generation*, which produces output token by token over many seconds. Same hardware, ~1000×
   faster. This asymmetry is why RAG is practical at all.
 
+## 2.1. A wrinkle: asymmetric models need a task prefix
+
+`nomic-embed-text` is an **asymmetric** model: it was trained with a short *task prefix* prepended
+to every input, and embedding raw prefix-less text runs it off-distribution. The two prefixes that
+matter here:
+
+- `search_document:` — text you **store** and compare like-for-like.
+- `search_query:` — a short **search query** you match *against* stored documents.
+
+The prefix you pick depends on whether the comparison is **symmetric** or **asymmetric**:
+
+- **Symmetric** (question ↔ question dedup, question ↔ content for unit-tagging): both sides are
+  full, comparable texts, so both get `search_document:`. Using query/document here actually
+  *hurts* — measured on this machine, the query/document split pushed a genuine paraphrase pair
+  down from **0.82 → 0.70**.
+- **Asymmetric** (a short generated *slot query* like "A 10-mark question about X" retrieving long
+  content chunks): this is the one case the query prefix is built for, so the slot query is
+  `search_query:` and the chunks are `search_document:`.
+
+So in QForge exactly one call site sends `search_query:` (the grounding slot query in
+`GroundingBuilder`); everything stored and every question-vs-question comparison is
+`search_document:`. Laravel picks the side per call via `PythonService::embed($texts, $task)`; the
+prefix itself lives in the Python embedder (`OllamaEmbedder`), because *which* prefix a model needs
+is a property of the model, not of Laravel's business logic.
+
+Because a prefix-less vector and a `search_document:` vector are different points on different
+maps, adding prefixes is a **model change**: the stored comparability tag becomes
+`nomic-embed-text/prefixed` (§6 rule 2) and switching it on requires
+`php artisan qforge:rag:reindex --fresh`.
+
 ## 3. Comparing vectors — cosine similarity
 
 Once texts are points on the meaning-map, "how similar are these two texts?" becomes "how close
@@ -237,10 +267,10 @@ Decisions made up front (the why is in Part 1):
 
 | Decision | Choice |
 |---|---|
-| Embedding model | `nomic-embed-text` (768-dim), served by the existing Ollama container |
+| Embedding model | `nomic-embed-text` (768-dim), task-prefixed (§2.1: `search_document:` / `search_query:`), served by the existing Ollama container |
 | Vector store | Qdrant container; **index, not source of truth**; rebuildable from MySQL |
 | Who talks to Qdrant | Laravel only, over REST (Python does no retrieval — see `python-service/app/services/llm/base.py`) |
-| Dedup policy | Auto-drop AI-generated near-duplicates; flag-only (human decides) in the extraction review queue |
+| Dedup policy | Auto-drop AI-generated near-duplicates; in the extraction review queue **both** the exact-text and semantic layers only *flag* — the human decides |
 | Grounding retrieval | Budget-based hybrid: whole content when it fits the prompt budget, top-k chunks when it doesn't |
 | Unit suggestions | Suggest-only with scores; unit tags stay human-assigned (per Post-M5 decision) |
 | Similarity thresholds | Config-tunable, never hardcoded |
@@ -312,21 +342,23 @@ both contracts — request shapes, response parsing, and the re-index command's 
 
 ### Seen working
 
-Measured on this machine at the end of Phase 0, via a real `/embed` call:
+Measured on this machine via a real `/embed` call. With the task prefixes from §2.1 — the stored
+text as a `document`, the paraphrase as a `search_query` retrieving it:
 
 ```text
-cosine("Explain TCP congestion control", "Describe how TCP avoids congestion") = 0.851
-cosine("Explain TCP congestion control", "What is a binary search tree?")      = 0.343
+cosine_qd("Describe how TCP avoids congestion" → "Explain TCP congestion control") = 0.754
+cosine_qd("Describe how TCP avoids congestion" → "What is a binary search tree?")  = 0.341
 ```
 
-Different words, same meaning → 0.851. Same field, different topic → 0.343. That gap is the
-entire mechanism §§2–3 promised, and every phase from here on just puts it to work. Reproduce it
-yourself:
+Different words, same meaning → 0.754; same field, different topic → 0.341. (For reference, the
+original prefix-*less* Phase 0 build scored the first pair 0.851 — higher in absolute terms, but
+those vectors were off the model's trained distribution; see §2.1.) That gap is the entire
+mechanism §§2–3 promised, and every phase from here on just puts it to work. Reproduce it yourself:
 
 ```bash
 curl -s -X POST http://localhost:8000/embed \
   -H 'Content-Type: application/json' \
-  -d '{"texts": ["Explain TCP congestion control", "Describe how TCP avoids congestion"]}'
+  -d '{"texts": ["Explain TCP congestion control"], "task": "document"}'
 ```
 
 ## Phase 1 — duplicate detection
@@ -398,6 +430,32 @@ never blocked.
 
 One policy, two postures: **automated pipeline → drop; human pipeline → flag.** That asymmetry
 is the phase's most important design decision.
+
+### Two dedup layers on the extraction path — both flag, never skip
+
+Semantic similarity (above) is the *second* filter a freshly-extracted candidate meets. The
+*first* is cheaper and older: [`CandidateImporter`](../code/app/Services/Extraction/CandidateImporter.php)
+md5-fingerprints the normalized text (lowercased, punctuation-stripped) to catch a **literal**
+repeat — the *same* question printed on a *different* year's paper — that no embedding is needed to
+recognise. The two layers answer different questions:
+
+| Layer | Detects | Pool | Signal |
+|---|---|---|---|
+| Exact fingerprint (`CandidateImporter`) | the *same* text again | approved + pending (rejected excluded) | `attributes.duplicate_of = [{question_id, status}, …]` |
+| Semantic (`SimilarQuestionFinder`) | a *paraphrase* | approved only | `attributes.similar = {question_id, score}` |
+
+Originally the fingerprint layer *silently skipped* a match — which meant re-uploading a paper
+whose questions you'd already **rejected** silently dropped every one of them, looking like a
+mysterious "N duplicates skipped". Now it matches the never-drop posture: the candidate **imports
+and is flagged** (a red *duplicate of Q#…* badge next to the amber *≈ similar* one), so the
+reviewer decides. Two deliberate scoping choices keep this sane:
+
+- **Rejected rows are excluded from the pool.** A candidate that only matches something you already
+  turned down imports clean — a fresh re-review, not a dead end.
+- **Exact repeats *within one upload*** (a paper printing a question twice) are still collapsed —
+  that's parser noise, not a re-review case.
+- **Bulk "Approve All" skips flagged duplicates** (reason `duplicate`), forcing a deliberate
+  per-item call so a re-upload of an approved paper can't silently re-enter the bank.
 
 ### Seen working
 

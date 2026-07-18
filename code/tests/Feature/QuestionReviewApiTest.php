@@ -196,6 +196,25 @@ class QuestionReviewApiTest extends TestCase
         $this->assertSame('pending', $unlinked->refresh()->status);
     }
 
+    public function test_bulk_approve_excludes_exact_duplicates(): void
+    {
+        $ready = $this->candidate();
+        $duplicate = $this->candidate([
+            'text' => 'Define a hash collision, again.',
+            'attributes' => ['duplicate_of' => [['question_id' => 999, 'status' => 'approved']]],
+        ]);
+
+        $this->postJson('/api/questions/bulk-approve', [
+            'ids' => [$ready->id, $duplicate->id],
+        ])->assertOk()
+            ->assertJsonPath('approved', [$ready->id])
+            ->assertJsonPath('skipped.0.id', $duplicate->id)
+            ->assertJsonPath('skipped.0.reason', 'duplicate');
+
+        // The duplicate is untouched — it needs an explicit, per-item decision.
+        $this->assertSame('pending', $duplicate->refresh()->status);
+    }
+
     public function test_bulk_reject_rejects_every_named_candidate(): void
     {
         $first = $this->candidate();

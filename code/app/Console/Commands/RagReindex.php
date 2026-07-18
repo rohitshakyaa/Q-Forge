@@ -76,7 +76,7 @@ class RagReindex extends Command
         Question::with('units')
             ->where('status', 'approved')
             ->chunkById(self::BATCH, function ($questions) use ($qdrant, $python, &$indexed, $bar) {
-                $embedded = $python->embed($questions->map(fn (Question $q) => (string) $q->text)->all());
+                $embedded = $python->embed($questions->map(fn (Question $q) => (string) $q->text)->all(), 'document');
 
                 $points = $questions->values()->map(
                     fn (Question $q, int $i) => QuestionPoints::make($q, $embedded['embeddings'][$i], $embedded['model'])

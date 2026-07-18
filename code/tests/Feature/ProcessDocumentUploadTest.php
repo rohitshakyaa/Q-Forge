@@ -112,6 +112,7 @@ class ProcessDocumentUploadTest extends TestCase
         $this->assertSame(2, $upload->meta['pages']);
         $this->assertSame(1, $upload->meta['ocr_pages']);
         $this->assertSame(2, $upload->meta['questions_created']);
+        $this->assertSame(0, $upload->meta['questions_duplicate']);
         $this->assertSame(1, $upload->meta['questions_unlinked']);
     }
 
@@ -159,19 +160,29 @@ class ProcessDocumentUploadTest extends TestCase
         $this->assertNull(Question::sole()->marks);
     }
 
-    public function test_re_importing_the_same_paper_does_not_duplicate_questions(): void
+    public function test_re_importing_the_same_paper_flags_duplicates_for_review(): void
     {
         $subject = $this->subjectWithUnits();
         $this->fakeExtract([$this->candidate()]);
 
         $this->runJob($this->upload($subject));
-        // Same question, reflowed line breaks and different case — still a duplicate.
+        $first = Question::sole();
+
+        // Same question, reflowed line breaks and different case — an exact match.
         $this->fakeExtract([$this->candidate(['text' => "define  a HASH\ncollision."])]);
         $second = $this->upload($subject);
         $this->runJob($second);
 
-        $this->assertSame(1, Question::count());
-        $this->assertSame(1, $second->refresh()->meta['questions_skipped']);
+        // No longer silently skipped: it imports and is flagged against the
+        // original so a reviewer decides (docs/RAG-GUIDE.md Phase 1).
+        $this->assertSame(2, Question::count());
+        $this->assertSame(1, $second->refresh()->meta['questions_duplicate']);
+        $this->assertSame(0, $second->meta['questions_skipped']);
+
+        $dupe = Question::where('id', '!=', $first->id)->sole();
+        $this->assertSame('pending', $dupe->status);
+        $this->assertSame($first->id, $dupe->attributes['duplicate_of'][0]['question_id']);
+        $this->assertSame('pending', $dupe->attributes['duplicate_of'][0]['status']);
     }
 
     public function test_a_syllabus_upload_is_parsed_but_creates_no_questions(): void

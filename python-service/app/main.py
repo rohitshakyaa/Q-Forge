@@ -78,7 +78,7 @@ def embed(request: EmbedRequest) -> Envelope[EmbedData]:
     embedder = get_embedder()
 
     try:
-        embeddings = embedder.embed(request.texts)
+        embeddings = embedder.embed(request.texts, request.task)
     except Exception as exc:  # noqa: BLE001 - surface the reason, never 500 the caller
         logger.exception("embedding failed")
         return Envelope.fail(f"embedding failed: {exc}")

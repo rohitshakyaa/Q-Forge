@@ -54,7 +54,7 @@ class SyncQuestionEmbedding implements ShouldQueue
             return;
         }
 
-        $embedded = $python->embed([$question->text]);
+        $embedded = $python->embed([$question->text], 'document');
 
         // The collection may not exist yet: Qdrant is a rebuildable index, so its
         // volume can be wiped (setup-fresh) or lost independently of MySQL, and a

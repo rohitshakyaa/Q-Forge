@@ -983,6 +983,14 @@ the viva-sized version.)*
 nearness; **Qdrant** (a vector database, one new container) stores the vectors and answers
 "top-k nearest, filtered by subject/unit/type" in milliseconds.
 
+**If asked about the embedding prefixes:** `nomic-embed-text` is *asymmetric* — it expects a task
+prefix on every input, so we send `search_document:` for stored/compared text and `search_query:`
+for the one genuine short retrieval query (the grounding slot description). Question-vs-question
+dedup is **symmetric**, so both sides use `search_document:` — measured, the query/document split
+*lowered* like-for-like scores (0.82 → 0.70). The prefix lives in the Python embedder (a model
+property, not business logic), and turning it on changes the comparability tag to
+`nomic-embed-text/prefixed`, which forces a `qforge:rag:reindex --fresh`.
+
 **The architecture ruling (say this verbatim if asked):** *"Embedding is processing, so it lives in
 Python (`POST /embed`); retrieval is decision-making over data, so it lives in Laravel. Qdrant is an
 **index, not a database** — MySQL stays the single source of truth, every vector is derived from a
@@ -1028,6 +1036,15 @@ talks to Qdrant, like Redis."*
    human's call at approval (an explicit human unit choice clears the badge). *Seen live:* a
    SWOT/environmental-scanning question suggested "Planning and Decision Making" at 0.751 without
    the word "planning" appearing in it.
+   *Sibling flag, not RAG:* alongside the semantic `similar` badge, `CandidateImporter` runs a cheap
+   **exact-text fingerprint** (md5 of normalized text) against the existing approved+pending bank.
+   It used to *silently skip* a match — which meant re-uploading a paper whose questions you'd
+   **rejected** dropped them all under a mysterious "N duplicates skipped". Now it **imports and
+   flags** (`attributes.duplicate_of` → a red *duplicate of Q#…* badge), rejected rows are excluded
+   from the pool (a clean re-review), within-upload repeats are still collapsed, and bulk
+   "Approve All" skips flagged duplicates so a re-upload can't silently re-enter the bank. *This is
+   not embeddings* — it's the honest answer to "the same paper twice", and it's independent of the
+   `similar` flag (a candidate can carry both).
 4. **Within-paper duplicate guard in the generator** (post-M6 — soft preference).
    [`VectorSimilarityGuard`](../code/app/Services/PaperGeneration/VectorSimilarityGuard.php) lets the
    greedy pass *prefer* candidates that aren't near-duplicates (cosine ≥ `RAG_DUPLICATE_THRESHOLD`

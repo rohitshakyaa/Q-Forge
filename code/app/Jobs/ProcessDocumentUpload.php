@@ -53,6 +53,7 @@ class ProcessDocumentUpload implements ShouldQueue
                 'ocr_pages' => $data['ocr_pages'] ?? null,
                 'questions_created' => $counts['created'],
                 'questions_skipped' => $counts['skipped'],
+                'questions_duplicate' => $counts['duplicate'],
                 'questions_unlinked' => $counts['unlinked'],
                 // A syllabus creates nothing on its own: the parsed courses wait here
                 // until an admin confirms them on the import screen.

@@ -75,6 +75,15 @@ class QuestionReviewController extends Controller
         $skipped = [];
 
         foreach ($questions as $question) {
+            // An exact duplicate of a bank/queue question demands a deliberate
+            // call — bulk approval must never silently re-admit it (docs/RAG-GUIDE.md
+            // Phase 1). The reviewer approves or rejects it one at a time.
+            if (! empty($question->attributes['duplicate_of'])) {
+                $skipped[] = ['id' => $question->id, 'reason' => 'duplicate'];
+
+                continue;
+            }
+
             if ($question->unit_id === null || $question->marks === null) {
                 $skipped[] = [
                     'id' => $question->id,

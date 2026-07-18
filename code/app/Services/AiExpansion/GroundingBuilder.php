@@ -290,7 +290,9 @@ class GroundingBuilder
         $query = "A {$marks}-mark {$type} exam question about {$scope} in {$subject->name}.";
 
         try {
-            return $this->python->embed([$query])['embeddings'][0];
+            // The slot description is a search query — matched against stored
+            // content chunks and exemplar questions.
+            return $this->python->embed([$query], 'query')['embeddings'][0];
         } catch (\Throwable $e) {
             Log::warning('GroundingBuilder: slot-query embedding failed, degrading to M5 grounding', [
                 'subject_id' => $subject->id, 'error' => $e->getMessage(),

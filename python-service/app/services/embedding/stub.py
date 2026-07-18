@@ -10,14 +10,17 @@ import hashlib
 import math
 import struct
 
-from .base import Embedder
+from .base import Embedder, EmbedTask
 
 
 class StubEmbedder(Embedder):
     dimensions = 768
     model = "stub"
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], task: EmbedTask = "document") -> list[list[float]]:
+        # `task` is ignored on purpose: keeping the same text → same vector
+        # (regardless of query/document) is what lets dedup plumbing tests assert
+        # exact matches. The fake has no notion of asymmetric retrieval anyway.
         return [self._vector(text) for text in texts]
 
     def _vector(self, text: str) -> list[float]:

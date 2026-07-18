@@ -248,7 +248,8 @@ onUnmounted(() => extraction.stopAllWatching());
                     <span v-if="u.type === 'past_paper' && u.questionsCreated !== null">
                       · {{ u.questionsCreated }} questions extracted
                     </span>
-                    <span v-if="u.questionsSkipped">· {{ u.questionsSkipped }} duplicates skipped</span>
+                    <span v-if="u.questionsDuplicate">· {{ u.questionsDuplicate }} flagged as duplicate</span>
+                    <span v-if="u.questionsSkipped">· {{ u.questionsSkipped }} repeats collapsed</span>
                     <span v-if="u.importedSubjectId">· imported as a subject</span>
                   </div>
                   <div v-if="u.error" style="font-size: 12px; color: var(--danger); margin-top: 4px">

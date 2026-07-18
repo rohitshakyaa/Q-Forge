@@ -66,7 +66,8 @@ class ContentIndexer
         }
 
         $embedded = $this->python->embed(
-            array_map(fn (ContentChunk $c) => $c->embeddingText(), $chunks)
+            array_map(fn (ContentChunk $c) => $c->embeddingText(), $chunks),
+            'document',
         );
 
         $points = [];

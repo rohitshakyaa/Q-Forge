@@ -19,30 +19,42 @@ class CandidateImporter
 
     /**
      * @param  array<int, array<string, mixed>>  $candidates
-     * @return array{created:int, skipped:int, unlinked:int}
+     * @return array{created:int, skipped:int, duplicate:int, unlinked:int}
      */
     public function import(DocumentUpload $upload, array $candidates): array
     {
         if ($upload->subject_id === null || $candidates === []) {
-            return ['created' => 0, 'skipped' => 0, 'unlinked' => 0];
+            return ['created' => 0, 'skipped' => 0, 'duplicate' => 0, 'unlinked' => 0];
         }
 
         $upload->loadMissing('subject.units');
         $resolver = new UnitResolver($upload->subject->units);
 
-        // One query rather than one per candidate; papers repeat across years, and
-        // re-importing the same PDF should not double the bank.
+        // One query rather than one per candidate. An exact match no longer drops
+        // the candidate — it imports and gets flagged so the reviewer decides
+        // (docs/RAG-GUIDE.md Phase 1). Rejected rows are excluded from the pool:
+        // a candidate that only matches something already turned down comes in
+        // clean, as a fresh re-review. Fingerprint => [{question_id, status}, ...]
+        // because the same text can sit in the bank several times over.
         $existing = Question::query()
             ->where('subject_id', $upload->subject_id)
-            ->pluck('text')
-            ->map(fn (string $text) => $this->fingerprint($text))
-            ->flip();
+            ->whereIn('status', ['approved', 'pending'])
+            ->get(['id', 'status', 'text'])
+            ->reduce(function (array $map, Question $q) {
+                $map[$this->fingerprint($q->text)][] = ['question_id' => $q->id, 'status' => $q->status];
+
+                return $map;
+            }, []);
 
         $created = 0;
         $skipped = 0;
+        $duplicate = 0;
         $createdQuestions = [];
+        // Exact repeats *within this one upload* are parser noise (a paper printing
+        // the same question twice), not a re-review case — collapse them.
+        $seenThisBatch = [];
 
-        DB::transaction(function () use ($upload, $candidates, $resolver, $existing, &$created, &$skipped, &$createdQuestions) {
+        DB::transaction(function () use ($upload, $candidates, $resolver, $existing, &$created, &$skipped, &$duplicate, &$createdQuestions, &$seenThisBatch) {
             foreach ($candidates as $candidate) {
                 $text = trim((string) ($candidate['text'] ?? ''));
                 if ($text === '') {
@@ -50,12 +62,16 @@ class CandidateImporter
                 }
 
                 $fingerprint = $this->fingerprint($text);
-                if ($existing->has($fingerprint)) {
+                if (isset($seenThisBatch[$fingerprint])) {
                     $skipped++;
 
                     continue;
                 }
-                $existing[$fingerprint] = true;
+                $seenThisBatch[$fingerprint] = true;
+
+                // Matches against the existing approved/pending bank become a flag,
+                // never a skip. Null when the candidate is fresh.
+                $duplicateOf = $existing[$fingerprint] ?? null;
 
                 $unit = $resolver->resolve($candidate['unit_hint'] ?? null);
 
@@ -74,6 +90,7 @@ class CandidateImporter
                         'page' => $candidate['page'] ?? null,
                         'ocr' => $candidate['ocr'] ?? false,
                         'exam_year' => $upload->meta['exam_year'] ?? null,
+                        'duplicate_of' => $duplicateOf,
                     ], fn ($value) => $value !== null),
                 ]);
 
@@ -82,6 +99,9 @@ class CandidateImporter
 
                 $createdQuestions[] = $question;
                 $created++;
+                if ($duplicateOf !== null) {
+                    $duplicate++;
+                }
             }
         });
 
@@ -96,7 +116,7 @@ class CandidateImporter
         // some of what the heading resolver could not.
         $unlinked = count(array_filter($createdQuestions, fn (Question $q) => $q->unit_id === null));
 
-        return ['created' => $created, 'skipped' => $skipped, 'unlinked' => $unlinked];
+        return ['created' => $created, 'skipped' => $skipped, 'duplicate' => $duplicate, 'unlinked' => $unlinked];
     }
 
     /**

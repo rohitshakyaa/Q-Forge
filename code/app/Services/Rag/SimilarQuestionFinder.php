@@ -66,7 +66,11 @@ class SimilarQuestionFinder
         }
 
         try {
-            $vectors = $this->python->embed($questions->map(fn (Question $q) => (string) $q->text)->all())['embeddings'];
+            // A candidate is a full question compared against other full
+            // questions (similar) and rich content chunks (unit suggestions) —
+            // like-for-like, so the symmetric "document" space, not a short query
+            // (docs/RAG-GUIDE.md §2.1).
+            $vectors = $this->python->embed($questions->map(fn (Question $q) => (string) $q->text)->all(), 'document')['embeddings'];
 
             $annotated = 0;
             foreach ($questions as $i => $question) {
