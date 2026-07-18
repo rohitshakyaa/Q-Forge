@@ -59,3 +59,28 @@ pages). Listed here so they aren't lost.
 
 *(Add here any source consulted but not cited in the text — syllabus p. 106 permits a separate
 Bibliography. Empty for now.)*
+
+---
+
+## IEEE format templates (use when adding a new entry)
+
+From the IEEE referencing style sheet (Univ. of Bath / IEEE citation guide) the supervisor provided.
+**In-text:** bracketed numbers in order of first appearance, before punctuation, space before the
+bracket — `… backtracking search [3].` Reuse the same number for later cites of the same source. Page
+locator for a direct quote/specific detail: `[1, p. 3]`. In the reference list, abbreviate authors
+with *et al.* only when there are **six or more**.
+
+| Type | Template |
+|---|---|
+| **Book** | `[n] A. B. Author, Book Title, Xth ed. City, Country: Publisher, Year.` |
+| **Book chapter** | `[n] A. B. Author, "Chapter title," in Book Title, Xth ed., C. D. Editor, Ed. City: Publisher, Year, pp. xx–yy.` |
+| **Journal article** | `[n] A. B. Author, "Article title," Journal Abbrev., vol. x, no. y, pp. xx–yy, Mon. Year.` (omit `no.` if the journal has no issue numbers) |
+| **Conference paper** | `[n] A. B. Author, "Paper title," in Proc. Conf. Name Abbrev., City, Year, pp. xx–yy.` |
+| **Thesis/dissertation** | `[n] A. B. Author, "Title," M.S. thesis / Ph.D. dissertation, Abbrev. Dept., Abbrev. Univ., City, Year.` |
+| **Standard** | `[n] Title of Standard, Standard number, Year.` |
+| **Technical report** | `[n] A. B. Author, "Title," Abbrev. Company/Inst., City, Rep. no., Year.` |
+| **Website** | `[n] A. B. Author. (Year, Mon. Day). Page title. [Online]. Available: URL` |
+| **E-book / e-only doc** | add `[Online]` after the title and end with `Available: URL` (a PDF that mirrors print is cited as the print version). |
+
+Journal-title abbreviations follow the IEEE `trans_journal_names` list. For QForge's mix (journal +
+conference + book + a few web/tool docs) these nine cover every case.

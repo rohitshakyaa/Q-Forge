@@ -288,6 +288,17 @@ gives "1.1"-style numbering; confirm the user wants that vs. Word field numberin
 without confirming `tu-template.docx` exists and that the user wants a generated (vs. hand-styled)
 file.
 
+### 7.4 Chosen build method — Claude Desktop / claude.ai file creation
+
+The user's selected path is **not** the local Pandoc automation above. Instead, the nine content
+Markdown files are **attached to a Claude Desktop / claude.ai chat**, and Claude's **file-creation**
+ability generates the `.docx` directly to the §7.1 format. The ready-made, self-contained prompt for
+this is [`docs/09-build-docx.prompt.md`](docs/09-build-docx.prompt.md) — it embeds the whole §7.1
+format spec (so no repo files are needed beyond the nine chapters), fixes the concatenation order,
+excludes the guide/prompt files, keeps every `{{token}}` visible (never invents facts), and asks for
+BUILD NOTES listing leftover tokens + any finishing step to do in Word. The Pandoc recipe in §7.3
+remains the fallback if a Claude surface lacks file creation.
+
 ---
 
 ## 8. Placeholders to collect before a final build
@@ -318,6 +329,9 @@ Fill these before producing a submission-ready `.docx`; until then leave the `{{
 | Docker/networking/queues/conventions | [`../docs/CONVENTIONS.md`](../docs/CONVENTIONS.md) |
 | Architecture decisions (imported papers, syllabus import) | [`../docs/adr/`](../docs/adr/) |
 | Diagram sources | [`../docs/diagrams/`](../docs/diagrams/) |
+| **Per-section writing quality rubric** (abstract/intro/problem-statement/lit-review/testing checklists, examiner criteria, plagiarism rules) | [`WRITING-QUALITY.md`](WRITING-QUALITY.md) |
+| IEEE format templates for new references | [`references.md`](references.md) (bottom) |
+| **Paste-ready per-section writing prompts** (one Claude Code prompt per chapter) | [`docs/`](docs/) ([index](docs/README.md)) |
 | The binding format & chapter structure | `projectworksyllabus-1.pdf` (pp. 101–107) |
 | Actual code to describe truthfully | `../code/`, `../python-service/`, `../frontend/` |
 
