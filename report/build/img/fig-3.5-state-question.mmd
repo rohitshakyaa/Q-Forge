@@ -1,0 +1,12 @@
+%% {{FIGURE: report/figures/fig-3.5-state-question.mmd — Figure 3.5}}
+stateDiagram-v2
+    [*] --> pending : extracted / manual create
+    [*] --> approved : AI top-up (source = ai)
+    pending --> approved : admin approves
+    pending --> rejected : admin rejects
+    approved --> [*] : deleted / re-extracted
+    rejected --> [*] : discarded
+    note right of approved
+        Only approved questions are
+        selectable by the generator.
+    end note

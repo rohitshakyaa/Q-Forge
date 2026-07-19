@@ -1,0 +1,20 @@
+%% {{FIGURE: report/figures/fig-4.3-state-paper-design.mmd — Figure 4.3}}
+stateDiagram-v2
+    [*] --> Previewing : POST /papers/generate (fresh seed)
+    Previewing --> FeasiblePreview : all constraints pass
+    Previewing --> InfeasiblePreview : missing_slots returned
+    FeasiblePreview --> Previewing : regenerate (new seed)
+    InfeasiblePreview --> Previewing : regenerate (new seed)
+    InfeasiblePreview --> ExpandingBank : Expand bank with AI (top-up)
+    ExpandingBank --> Previewing : approved AI questions added, regenerate
+    FeasiblePreview --> Saved : POST /papers (re-run from seed)
+    Saved --> Exported : GET /papers/{id}/export (pdf | docx)
+    Exported --> Exported : re-export (export_count++)
+    Saved --> [*] : delete
+    Exported --> [*] : delete
+    note right of ExpandingBank
+        AI is supportive only: it enlarges
+        the bank, never the paper. The
+        deterministic engine still owns
+        the final result.
+    end note

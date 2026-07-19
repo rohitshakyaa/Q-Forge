@@ -1,0 +1,13 @@
+%% {{FIGURE: report/figures/fig-3.6-state-paper.mmd — Figure 3.6}}
+stateDiagram-v2
+    [*] --> Preview : POST /papers/generate (unsaved, id = null, + seed)
+    Preview --> Preview : regenerate (new seed)
+    Preview --> Saved : POST /papers (persist, re-run from seed)
+    Saved --> Exported : GET /papers/{id}/export (pdf | docx)
+    Exported --> Exported : re-export (export_count++)
+    Saved --> [*] : delete
+    Exported --> [*] : delete
+    note right of Preview
+        Discarded if never saved —
+        no history clutter.
+    end note

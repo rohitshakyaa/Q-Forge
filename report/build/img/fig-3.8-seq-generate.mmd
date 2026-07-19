@@ -1,0 +1,39 @@
+%% {{FIGURE: report/figures/fig-3.8-seq-generate.mmd — Figure 3.8}}
+sequenceDiagram
+    actor T as Teacher
+    participant FE as Frontend
+    participant API as Laravel API
+    participant PG as PaperGenerator
+    participant DB as MySQL
+
+    T->>FE: Select blueprint, click "Generate"
+    FE->>API: POST /papers/generate { blueprint_id, seed? }
+    API->>PG: generate(blueprint, seed)
+    PG->>PG: BlueprintCompiler -> slots
+    loop each slot
+        PG->>DB: CandidateFilter (subject/unit/type/marks,<br/>exclude last N papers + already chosen)
+        DB-->>PG: candidate pool
+        PG->>PG: GreedySelector picks best (coverage, LRU, seeded tie-break;<br/>similarity guard prefers non-duplicates)
+    end
+    PG->>PG: ConstraintValidator (counts, marks, coverage, maximums, repetition)
+    alt all constraints satisfied
+        PG-->>API: preview paper + constraint_results[] + seed
+        API-->>FE: 200 { paper (id=null), seed, constraint_results }
+        FE-->>T: Render preview + green/red constraints
+        opt Teacher saves
+            T->>FE: Click "Save"
+            FE->>API: POST /papers { blueprint_id, seed, name? }
+            API->>PG: re-generate deterministically (same seed)
+            API->>DB: persist paper (status=saved) + paper_questions,<br/>increment used_count
+            API-->>FE: 201 { paper }
+        end
+    else validation fails
+        PG->>PG: BacktrackingResolver tries alternates
+        alt resolved
+            PG-->>API: valid preview paper
+        else bank too thin
+            PG-->>API: { satisfiable:false, missing_slots[] }
+            API-->>FE: 200 { satisfiable:false, missing_slots }
+            FE-->>T: Show "cannot satisfy" + "Expand bank with AI"
+        end
+    end

@@ -1,0 +1,19 @@
+%% {{FIGURE: report/figures/fig-3.10-activity-generate.mmd — Figure 3.10}}
+flowchart TD
+    A([POST /papers/generate · blueprint_id · seed?]) --> B[BlueprintCompiler:<br/>sections → ordered slots,<br/>unitRules → allowedUnitIds]
+    B --> C[/Greedy pass — for each slot in order/]
+    C --> D[CandidateFilter:<br/>approved · subject · type · marks<br/>∈ allowedUnits · exclude last-N + chosen<br/>· exclude recent exam years]
+    D --> E[GreedySelector:<br/>uncovered-unit-first, then LRU,<br/>then seeded tie-break;<br/>similarity guard prefers non-duplicates]
+    E --> F{More slots?}
+    F -- yes --> C
+    F -- no --> G[ConstraintValidator:<br/>counts · total marks · unit coverage ·<br/>unit maximums · no repetition]
+    G --> H{All slots filled<br/>AND all constraints pass?}
+    H -- yes --> S1([SUCCESS])
+    H -- no --> I[Build full candidate pool per slot]
+    I --> J[BacktrackingResolver:<br/>bounded DFS, uncovered-unit-first,<br/>distinct ids, coverage must hold]
+    J --> K{Valid assignment<br/>found?}
+    K -- yes --> G2[Re-validate selections] --> S1
+    K -- no --> L[computeMissingSlots:<br/>1 supply deficit = required − available<br/>2 else uncovered allowed units]
+    L --> F2([INFEASIBLE:<br/>best-effort partial + missing_slots])
+    S1 --> R1([200 · unsaved preview paper + seed + constraint_results])
+    F2 --> R2([200 · satisfiable:false ·<br/>partial paper + missing_slots + constraint_results])

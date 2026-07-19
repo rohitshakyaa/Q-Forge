@@ -1,0 +1,31 @@
+%% {{FIGURE: report/figures/fig-4.5-activity-generate-design.mmd — Figure 4.5}}
+flowchart TD
+    A([POST /papers/generate - blueprint_id - seed?]) --> B[Phase 0 BlueprintCompiler:<br/>sections to ordered slots,<br/>unitRules to allowedUnitIds, caps]
+
+    B --> C[/Phase 1 Greedy pass - for each slot in order/]
+    C --> D[CandidateFilter:<br/>approved - subject - type - marks<br/>any tag in allowedUnits - exclude chosen + last-N + exam-years<br/>reject cap-busting candidates<br/>prefer non-near-duplicates soft]
+    D --> E[GreedySelector:<br/>uncovered-unit-first,<br/>then used_count,<br/>then seeded tie-break]
+    E --> F{More slots?}
+    F -- yes --> C
+
+    F -- no --> G[Phase 2 ConstraintValidator:<br/>counts - total marks - unit coverage -<br/>unit maximums - no repetition]
+    G --> H{All slots filled<br/>AND all constraints pass?}
+
+    H -- yes --> S1([SUCCESS])
+
+    H -- no --> H2{Structurally infeasible?<br/>units greater than 2x slots, or every unit<br/>capped and sum of caps less than slots}
+    H2 -- yes --> L
+    H2 -- no --> I[Build full candidate pool per slot]
+    I --> J[Phase 3 BacktrackingResolver:<br/>bounded DFS, uncovered-unit-first,<br/>distinct ids, caps pruned,<br/>coverage must hold]
+    J --> K{Valid assignment<br/>found?}
+
+    K -- yes --> G2[Re-validate selections] --> S1
+
+    K -- no --> L[Phase 4 computeMissingSlots:<br/>1 supply deficit = required minus available<br/>2 else uncovered allowed units<br/>paired scarcest-first when units greater than slots]
+    L --> F2([INFEASIBLE:<br/>best-effort partial + missing_slots])
+
+    S1 --> R1([200 PREVIEW: paper id=null + seed + blueprint_id<br/>+ constraint_results - nothing persisted])
+    R1 --> P[/Phase 5 Later: POST /papers Save<br/>re-generate from seed/]
+    P --> P2[persist papers status=saved + paper_questions<br/>bump used_count - stamp last_used_at - 201]
+
+    F2 --> R2([200 satisfiable:false -<br/>partial paper + missing_slots + constraint_results + seed])

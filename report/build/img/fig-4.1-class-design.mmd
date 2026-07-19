@@ -1,0 +1,73 @@
+%% {{FIGURE: report/figures/fig-4.1-class-design.mmd — Figure 4.1}}
+classDiagram
+    class PaperGenerator {
+        +generate(Blueprint, seed, guard) GenerationResult
+        -greedyFill(compiled, exclusions, seed, guard) Question[]
+        -computeMissingSlots(compiled, partial, pools) MissingSlot[]
+    }
+    class BlueprintCompiler {
+        +compile(Blueprint) CompiledBlueprint
+    }
+    class CandidateFilter {
+        +for(Slot, CompiledBlueprint, excludedIds, exclusion) Collection
+    }
+    class GreedySelector {
+        +pick(candidates, uncoveredUnitIds, seed) Question
+    }
+    class ConstraintValidator {
+        +validate(CompiledBlueprint, selections) ConstraintResult[]
+        +allPass(results) bool
+    }
+    class BacktrackingResolver {
+        -int MAX_ITERATIONS
+        +resolve(CompiledBlueprint, candidatesBySlot, seed) Question[]
+    }
+    class SimilarityGuard {
+        <<interface>>
+        +prime(questions)
+        +tooSimilar(candidate, chosen) bool
+    }
+    class NullSimilarityGuard {
+        +tooSimilar(candidate, chosen) bool
+    }
+    class VectorSimilarityGuard {
+        -broken bool
+        +prime(questions)
+        +tooSimilar(candidate, chosen) bool
+    }
+    class TieBreaker {
+        +key(seed, id) int
+    }
+    class CompiledBlueprint {
+        +slots Slot[]
+        +allowedUnitIds int[]
+        +unitCaps map
+        +structurallyInfeasible() bool
+    }
+    class GenerationResult {
+        +satisfiable bool
+        +selections Question[]
+        +constraintResults ConstraintResult[]
+        +missingSlots MissingSlot[]
+    }
+    class Slot
+    class ConstraintResult
+    class MissingSlot
+
+    PaperGenerator *-- BlueprintCompiler
+    PaperGenerator *-- CandidateFilter
+    PaperGenerator *-- GreedySelector
+    PaperGenerator *-- ConstraintValidator
+    PaperGenerator *-- BacktrackingResolver
+    PaperGenerator ..> SimilarityGuard : consults (greedy only)
+    SimilarityGuard <|.. NullSimilarityGuard
+    SimilarityGuard <|.. VectorSimilarityGuard
+    GreedySelector ..> TieBreaker
+    BacktrackingResolver ..> TieBreaker
+    BlueprintCompiler ..> CompiledBlueprint : builds
+    PaperGenerator ..> GenerationResult : returns
+    CompiledBlueprint *-- Slot
+    GenerationResult *-- ConstraintResult
+    GenerationResult *-- MissingSlot
+    CandidateFilter ..> Question : queries approved bank
+    VectorSimilarityGuard ..> QdrantClient : cosine over vectors

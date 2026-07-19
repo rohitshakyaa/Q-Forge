@@ -1,0 +1,96 @@
+%% {{FIGURE: report/figures/fig-4.8-er-persistence.mmd — Figure 4.8}}
+erDiagram
+    USERS ||--o{ BLUEPRINTS : owns
+    USERS ||--o{ PAPERS : owns
+    USERS ||--o{ DOCUMENT_UPLOADS : uploads
+    SUBJECTS ||--o{ UNITS : has
+    SUBJECTS ||--o{ QUESTIONS : scopes
+    SUBJECTS ||--o{ BLUEPRINTS : targets
+    SUBJECTS ||--o{ PAPERS : for
+    SUBJECTS ||--o{ DOCUMENT_UPLOADS : for
+    SUBJECTS ||--o{ CONTENT_CHUNKS : "chunked into"
+    UNITS ||--o{ QUESTIONS : "groups (primary)"
+    UNITS ||--o{ PAPER_QUESTIONS : tags
+    UNITS ||--o{ CONTENT_CHUNKS : "chunked into (nullable)"
+    QUESTIONS ||--o{ QUESTION_UNIT : tagged
+    UNITS ||--o{ QUESTION_UNIT : tags
+    BLUEPRINTS ||--o{ PAPERS : generates
+    PAPERS ||--o{ PAPER_QUESTIONS : contains
+    QUESTIONS ||--o{ PAPER_QUESTIONS : "appears in"
+
+    USERS {
+        bigint id PK
+        string name
+        string email UK
+        enum role "teacher|admin"
+    }
+    SUBJECTS {
+        bigint id PK
+        string code UK
+        string name
+        text syllabus
+    }
+    UNITS {
+        bigint id PK
+        bigint subject_id FK
+        int position
+        text content
+    }
+    QUESTIONS {
+        bigint id PK
+        bigint subject_id FK
+        bigint unit_id FK "primary unit"
+        enum type "short|long|mcq"
+        int marks
+        text text
+        enum source "extracted|ai|manual"
+        enum status "pending|approved|rejected"
+        json attributes "exam_year, ..."
+        int used_count
+    }
+    QUESTION_UNIT {
+        bigint question_id FK
+        bigint unit_id FK
+    }
+    CONTENT_CHUNKS {
+        bigint id PK "Qdrant point id"
+        bigint subject_id FK
+        bigint unit_id FK "null = syllabus chunk"
+        smallint position
+        string heading
+        text text
+    }
+    BLUEPRINTS {
+        bigint id PK
+        bigint owner_id FK
+        bigint subject_id FK
+        int total_marks
+        json definition
+        datetime last_used_at
+    }
+    PAPERS {
+        bigint id PK
+        bigint owner_id FK
+        bigint blueprint_id FK
+        bigint subject_id FK
+        enum origin "generated|imported"
+        enum status "draft|saved|exported"
+        int export_count
+    }
+    PAPER_QUESTIONS {
+        bigint id PK
+        bigint paper_id FK
+        bigint question_id FK
+        bigint unit_id FK
+        string section_label
+        int display_no
+        int marks
+        bool is_ai
+    }
+    DOCUMENT_UPLOADS {
+        bigint id PK
+        bigint uploader_id FK
+        bigint subject_id FK
+        enum type "syllabus|past_paper"
+        enum status "uploaded|processing|parsed|failed"
+    }

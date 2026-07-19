@@ -1,0 +1,47 @@
+%% {{FIGURE: report/figures/fig-4.4-seq-generate-design.mmd — Figure 4.4}}
+sequenceDiagram
+    actor T as Teacher
+    participant API as Laravel API
+    participant PG as PaperGenerator
+    participant SG as VectorSimilarityGuard
+    participant QD as Qdrant
+    participant DB as MySQL
+    participant JOB as ExpandQuestionBank
+    participant PY as Python /generate-questions
+    participant OL as Ollama
+
+    T->>API: POST /papers/generate { blueprint_id, seed? }
+    API->>PG: generate(blueprint, seed, guard)
+    PG->>PG: BlueprintCompiler -> CompiledBlueprint (slots, units, caps)
+    loop each slot in order
+        PG->>DB: CandidateFilter (approved; subject/type/marks; allowed units;<br/>exclude chosen + last-N papers + recent exam years)
+        DB-->>PG: candidate pool
+        PG->>SG: prime(pool); tooSimilar(candidate, chosen)?
+        SG->>QD: retrieve question vectors (cosine >= threshold)
+        QD-->>SG: vectors (fail-open when unavailable)
+        PG->>PG: GreedySelector.pick (coverage, LRU, seeded tie-break)
+    end
+    PG->>PG: ConstraintValidator (counts, marks, coverage, maximums, repetition)
+    alt all constraints pass
+        PG-->>API: preview paper (id = null) + seed + constraint_results
+        API-->>T: 200 preview
+    else validation fails
+        PG->>PG: BacktrackingResolver (bounded DFS, coverage must hold)
+        alt valid assignment found
+            PG-->>API: valid preview paper
+            API-->>T: 200 preview
+        else structurally / supply infeasible
+            PG-->>API: satisfiable:false + missing_slots
+            API-->>T: 200 shortfall + "Expand bank with AI"
+            opt Teacher accepts top-up
+                T->>API: request AI top-up { missing_slots }
+                API->>JOB: dispatch ExpandQuestionBank
+                JOB->>PY: POST /generate-questions (RAG-grounded prompt)
+                PY->>OL: local LLM generate
+                OL-->>PY: draft questions
+                PY-->>JOB: candidate questions
+                JOB->>DB: insert questions (source = ai, status = approved)
+                T->>API: regenerate (engine re-runs over the enlarged bank)
+            end
+        end
+    end

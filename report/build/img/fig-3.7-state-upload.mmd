@@ -1,0 +1,12 @@
+%% {{FIGURE: report/figures/fig-3.7-state-upload.mmd — Figure 3.7}}
+stateDiagram-v2
+    [*] --> uploaded : POST /uploads (file stored)
+    uploaded --> processing : ProcessDocumentUpload picked up (Horizon)
+    processing --> parsed : Python /extract returns candidates
+    processing --> failed : extraction error
+    parsed --> [*]
+    failed --> [*]
+    note right of parsed
+        Candidates land as pending
+        questions for admin review.
+    end note

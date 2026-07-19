@@ -1,0 +1,46 @@
+%% {{FIGURE: report/figures/fig-3.1-uc-analysis.mmd — Figure 3.1}}
+flowchart LR
+    admin(["Admin<br/>(content steward)"])
+    teacher(["Teacher<br/>(paper author)"])
+    pyservice(["System / Python service<br/>(secondary actor)"])
+
+    subgraph QForge["QForge system boundary"]
+        direction TB
+        UC1(["Manage users & roles"])
+        UC2(["Manage subjects & units"])
+        UC3(["Manage question bank"])
+        UC4(["Upload past-paper / syllabus PDF"])
+        UC5(["Review extracted candidates"])
+        UC6(["Import syllabus into catalog"])
+        UC7(["Build blueprint"])
+        UC8(["Generate paper"])
+        UC9(["Expand bank with AI (top-up)"])
+        UC10(["Save & edit paper"])
+        UC11(["Export paper (PDF / DOCX)"])
+        UC12(["View history & analytics"])
+        UC13(["Extract candidates from PDF"])
+        UC14(["Generate AI questions"])
+    end
+
+    admin --- UC1
+    admin --- UC2
+    admin --- UC3
+    admin --- UC4
+    admin --- UC5
+    admin --- UC6
+
+    teacher --- UC7
+    teacher --- UC8
+    teacher --- UC9
+    teacher --- UC10
+    teacher --- UC11
+    teacher --- UC12
+
+    UC4 -. "&laquo;include&raquo;" .-> UC13
+    UC6 -. "&laquo;include&raquo;" .-> UC13
+    UC9 -. "&laquo;include&raquo;" .-> UC14
+    UC8 -. "&laquo;extend&raquo;" .-> UC9
+    UC5 -. "&laquo;extend&raquo;" .-> UC3
+
+    UC13 --- pyservice
+    UC14 --- pyservice
