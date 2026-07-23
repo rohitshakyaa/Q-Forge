@@ -8,11 +8,14 @@ const route = useRoute();
 const router = useRouter();
 const store = usePapersStore();
 
-// Preview mode = the unsaved generate result (store.current, no id yet). The
-// id route is a persisted paper loaded authoritatively from the server.
+// Preview mode = the just-generated result held in store.current; the id route is
+// loaded authoritatively from the server. Every generated paper is auto-saved as a
+// draft, so the Save/Discard vs Export choice follows the paper's STATUS, not the
+// route — a draft reopened from History must offer Save/Discard, not Export.
 const isPreview = computed(() => route.name === 'teacher-paper-preview');
 const paperId = computed(() => Number(route.params.id));
 const paper = computed(() => (isPreview.value ? store.current : store.getById(paperId.value)));
+const isDraft = computed(() => paper.value?.status === 'draft');
 
 onMounted(() => {
   // A preview already lives in the store; only saved papers are fetched by id
@@ -20,11 +23,19 @@ onMounted(() => {
   if (!isPreview.value) store.fetchById(paperId.value);
 });
 
-// Save the preview → the server persists it and returns its new id; jump to the
-// real paper page so Export becomes available and a refresh keeps it.
-const savePreview = async () => {
-  const id = await store.savePaper();
-  if (id !== null) router.replace(`/teacher/paper/${id}`);
+// Save = promote the draft to a kept paper. Works both from the preview and from a
+// draft reopened in History (the by-id promote needs no generation seed).
+const savePaper = async () => {
+  const id = paper.value?.id ?? null;
+  const savedId = id !== null ? await store.saveDraft(id) : await store.savePaper();
+  if (savedId !== null) router.replace(`/teacher/paper/${savedId}`);
+};
+
+// Discard = throw the draft away, then leave the page.
+const discardPaper = async () => {
+  const id = paper.value?.id ?? null;
+  if (id !== null) await store.discardPaper(id);
+  router.push(isPreview.value ? '/teacher/generate' : '/teacher/history');
 };
 </script>
 
@@ -32,21 +43,21 @@ const savePreview = async () => {
   <div v-if="paper" class="qf-content qf-anim-in">
     <QFPageHeader
       :title="paper.name"
-      :subtitle="isPreview
-        ? `${paper.subject} · ${paper.marks} marks · ${paper.duration} minutes · Preview — not saved yet`
+      :subtitle="isDraft
+        ? `${paper.subject} · ${paper.marks} marks · ${paper.duration} minutes · Draft — not saved yet`
         : `${paper.subject} · ${paper.marks} marks · ${paper.duration} minutes · Generated ${paper.date}`"
       :breadcrumbs="[
         { label: 'Dashboard', to: '/teacher' },
         { label: 'Generate', to: '/teacher/generate' },
-        { label: isPreview ? 'Preview' : paper.name },
+        { label: isDraft ? 'Draft' : paper.name },
       ]"
     >
       <template #actions>
-        <template v-if="isPreview">
-          <QFButton variant="secondary" size="sm" @click="router.push('/teacher/generate')">
+        <template v-if="isDraft">
+          <QFButton variant="secondary" size="sm" :disabled="store.saving" @click="discardPaper">
             ← Discard
           </QFButton>
-          <QFButton variant="primary" size="sm" :disabled="store.saving" @click="savePreview">
+          <QFButton variant="primary" size="sm" :disabled="store.saving" @click="savePaper">
             {{ store.saving ? 'Saving…' : 'Save Paper' }}
           </QFButton>
         </template>

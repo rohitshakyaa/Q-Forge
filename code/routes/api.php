@@ -114,6 +114,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Static segments before the {paper} wildcard so they aren't swallowed by it.
         Route::get('papers/analytics', [PaperController::class, 'analytics']);
         Route::get('papers/{paper}/export', [PaperController::class, 'export']);
+        Route::post('papers/{paper}/save', [PaperController::class, 'save']);
         Route::apiResource('papers', PaperController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
     });
 });

@@ -110,6 +110,10 @@ class PaperGenerator
         // papers age out normally (pure rolling; no special treatment).
         $recentPaperIds = Paper::query()
             ->where('subject_id', $blueprint->subject_id)
+            // Only kept papers count toward the rolling window — an unsaved
+            // auto-draft (including this run's own) must never exclude its
+            // questions from the next generate/regenerate.
+            ->where('status', '!=', 'draft')
             ->where(fn (Builder $q) => $q
                 ->where('owner_id', $blueprint->owner_id)
                 ->orWhere('origin', 'imported'))

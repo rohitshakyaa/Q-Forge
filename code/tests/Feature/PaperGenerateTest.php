@@ -42,7 +42,7 @@ class PaperGenerateTest extends TestCase
         ]);
     }
 
-    public function test_generate_returns_a_preview_and_persists_nothing(): void
+    public function test_generate_auto_persists_a_draft_without_bumping_usage(): void
     {
         $teacher = User::factory()->create(['role' => 'teacher']);
         $subject = Subject::factory()->create();
@@ -62,20 +62,57 @@ class PaperGenerateTest extends TestCase
 
         Sanctum::actingAs($teacher);
 
-        $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
+        $id = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
             ->assertOk()
             ->assertJsonPath('satisfiable', true)
-            // A preview: no id, and the seed + blueprint are echoed for Save.
-            ->assertJsonPath('paper.id', null)
+            // Auto-persisted as a draft: a real id + status 'draft', with seed +
+            // blueprint echoed so Save can promote it.
+            ->assertJsonPath('paper.status', 'draft')
             ->assertJsonPath('blueprint_id', $blueprint->id)
             ->assertJsonStructure(['seed'])
             ->assertJsonCount(3, 'paper.sections.0.questions')
-            ->assertJsonPath('constraint_results.0.pass', true);
+            ->assertJsonPath('constraint_results.0.pass', true)
+            ->json('paper.id');
 
-        // Nothing is persisted, nothing is used, the blueprint is untouched.
-        $this->assertSame(0, Paper::count());
+        $this->assertNotNull($id);
+
+        // Exactly one draft persisted; a draft is not "used", so usage counters and
+        // the blueprint's last_used_at stay untouched until an explicit Save.
+        $this->assertSame(1, Paper::count());
+        $this->assertSame('draft', Paper::sole()->status);
         $this->assertSame(0, Question::where('used_count', '>', 0)->count());
         $this->assertNull($blueprint->fresh()->last_used_at);
+    }
+
+    public function test_regenerating_replaces_the_previous_draft(): void
+    {
+        $teacher = User::factory()->create(['role' => 'teacher']);
+        $subject = Subject::factory()->create();
+        $units = collect(['Unit 1', 'Unit 2', 'Unit 3'])->map(
+            fn ($name, $i) => Unit::factory()->for($subject)->create(['name' => $name, 'position' => $i + 1])
+        );
+        foreach ($units as $unit) {
+            Question::factory()->count(2)->create([
+                'subject_id' => $subject->id, 'unit_id' => $unit->id,
+                'type' => 'short', 'marks' => 4, 'status' => 'approved', 'used_count' => 0,
+            ]);
+        }
+
+        $blueprint = $this->blueprintFor($teacher, $subject, [
+            ['name' => 'Section A', 'type' => 'Short Answer', 'count' => 3, 'marksEach' => 4],
+        ], ['Unit 1', 'Unit 2', 'Unit 3'], 12);
+
+        Sanctum::actingAs($teacher);
+
+        $first = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
+            ->assertOk()->json('paper.id');
+        $second = $this->postJson('/api/papers/generate', ['blueprint_id' => $blueprint->id])
+            ->assertOk()->json('paper.id');
+
+        // One live draft per blueprint — the second generate replaced the first.
+        $this->assertNotSame($first, $second);
+        $this->assertSame(1, Paper::count());
+        $this->assertNull(Paper::find($first));
     }
 
     public function test_saving_a_preview_persists_it_and_bumps_used_count(): void

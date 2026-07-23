@@ -48,7 +48,7 @@ export const navigationByRole: Record<UserRole, NavSection[]> = {
     },
     {
       label: 'Records',
-      items: [{ title: 'History & Analytics', path: '/teacher/history', icon: '◎' }],
+      items: [{ title: 'History', path: '/teacher/history', icon: '◎' }],
     },
   ],
 };

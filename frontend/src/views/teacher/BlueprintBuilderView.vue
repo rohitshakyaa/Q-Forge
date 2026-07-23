@@ -142,7 +142,7 @@ const setDashedHover = (e: MouseEvent, enter: boolean) => {
                 "
               >{{ bp.subject }}</span>
             </div>
-            <QFBadge v-if="bp.aiAssist" variant="ai" style="flex-shrink: 0">✦ AI</QFBadge>
+            <!-- <QFBadge v-if="bp.aiAssist" variant="ai" style="flex-shrink: 0">✦ AI</QFBadge> -->
           </div>
 
           <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap">

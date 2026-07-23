@@ -248,31 +248,6 @@ const exclusionRules = [
               @update:model-value="(v) => (bp.duration = +v)"
             />
           </div>
-          <div
-            style="
-              display: flex;
-              align-items: center;
-              gap: 10px;
-              padding: 12px 14px;
-              background: var(--bg2);
-              border-radius: var(--radius);
-              border: 1px solid var(--border);
-            "
-          >
-            <input
-              id="aiAssistEdit"
-              v-model="bp.aiAssist"
-              type="checkbox"
-              style="width: 16px; height: 16px; accent-color: var(--cyan)"
-            />
-            <label for="aiAssistEdit" style="cursor: pointer">
-              <span style="font-weight: 500; font-size: 13.5px">Enable AI assistance</span>
-              <span style="color: var(--text3); font-size: 12.5px; margin-left: 8px">
-                AI fills gaps when constraints can't be fully satisfied
-              </span>
-            </label>
-            <QFBadge variant="ai" style="margin-left: auto">✦ Recommended</QFBadge>
-          </div>
         </div>
       </QFCard>
 

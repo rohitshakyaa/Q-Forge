@@ -75,12 +75,18 @@ class PaperController extends Controller
             ]);
         }
 
+        // A satisfiable paper is auto-persisted as a *draft* so it shows up in
+        // History immediately — Save/Export later promote it. Drafts do NOT bump
+        // used_count or last_used_at (see persistDraft), so reuse stats and the
+        // last-N-papers exclusion only ever count kept papers.
+        $paper = $this->persistDraft($blueprint, $result);
+
         return response()->json([
             'satisfiable' => true,
-            // Echoed so the client can pass them back to Save to persist this exact paper.
+            // Echoed so the client can pass them back to Save to promote this draft.
             'seed' => $seed,
             'blueprint_id' => $blueprint->id,
-            'paper' => $this->previewPaperPayload($blueprint, $result),
+            'paper' => PaperViewModel::for($paper)->toArray(),
             'constraint_results' => $result->constraintResultsArray(),
         ]);
     }
@@ -103,6 +109,23 @@ class PaperController extends Controller
         $blueprint = Blueprint::with('subject')->findOrFail($validated['blueprint_id']);
         abort_unless($blueprint->owner_id === $request->user()->id, 403, 'This blueprint belongs to another user.');
 
+        // The generate step auto-persists the previewed paper as a draft, so Save
+        // normally just promotes that exact draft (WYSIWYG — no re-generation).
+        $draft = Paper::where('owner_id', $blueprint->owner_id)
+            ->where('blueprint_id', $blueprint->id)
+            ->where('status', 'draft')
+            ->latest('id')
+            ->first();
+
+        if ($draft) {
+            $paper = $this->promoteDraft($draft, $validated['name'] ?? null);
+
+            return response()->json(['paper' => PaperViewModel::for($paper)->toArray()], 201);
+        }
+
+        // Fallback (no draft — e.g. a direct save): re-generate deterministically
+        // from the seed and persist. The engine is a pure function of
+        // (blueprint, seed, bank), so we refuse if the bank changed underneath.
         $result = $this->generator->generate(
             $blueprint,
             $validated['seed'],
@@ -132,44 +155,118 @@ class PaperController extends Controller
                 'name' => $name ?? $blueprint->name,
                 'total_marks' => $blueprint->total_marks,
                 'duration' => $blueprint->duration,
-                // Persisted only on an explicit Save, so it goes straight to
-                // 'saved' — there is no auto-created 'draft' any more.
                 'status' => 'saved',
                 'export_count' => 0,
                 'generated_at' => now(),
             ]);
 
-            $pickedIds = [];
+            $pickedIds = $this->snapshotQuestions($paper, $result);
 
-            foreach ($result->blueprint->slots as $slot) {
-                $question = $result->selections[$slot->index] ?? null;
-                if ($question === null) {
-                    continue;
-                }
-
-                $paper->paperQuestions()->create([
-                    'question_id' => $question->id,
-                    'unit_id' => $this->snapshotUnitId($question, $result->blueprint->allowedUnitIds),
-                    'section_label' => $slot->sectionLabel,
-                    'display_no' => $slot->displayNo,
-                    'marks' => $slot->marks,
-                    'is_ai' => $question->source === 'ai',
-                ]);
-
-                $pickedIds[] = $question->id;
-            }
-
-            // Denormalized usage counter (display + LRU tie-break). Repetition
-            // control itself is derived from paper_questions, not this column.
-            if (! empty($pickedIds)) {
-                Question::whereIn('id', $pickedIds)->increment('used_count');
-            }
-
-            // "Last used" on the blueprint cards; only a persisted paper counts as use.
-            $blueprint->update(['last_used_at' => now()]);
+            $this->markUsed($blueprint, $pickedIds);
 
             return $paper;
         });
+    }
+
+    /**
+     * Auto-persist a satisfiable preview as a *draft* on generate, so it appears
+     * in History without an explicit Save. Only one live draft per blueprint — a
+     * fresh generate replaces the previous one. Crucially this does NOT bump
+     * used_count / last_used_at: a draft is not a "used" paper, and the last-N
+     * exclusion + reuse analytics both skip drafts (see lastNExclusion/analytics).
+     */
+    private function persistDraft(Blueprint $blueprint, GenerationResult $result): Paper
+    {
+        return DB::transaction(function () use ($blueprint, $result) {
+            Paper::where('owner_id', $blueprint->owner_id)
+                ->where('blueprint_id', $blueprint->id)
+                ->where('status', 'draft')
+                ->delete();
+
+            $paper = Paper::create([
+                'owner_id' => $blueprint->owner_id,
+                'blueprint_id' => $blueprint->id,
+                'subject_id' => $blueprint->subject_id,
+                'name' => $blueprint->name,
+                'total_marks' => $blueprint->total_marks,
+                'duration' => $blueprint->duration,
+                'status' => 'draft',
+                'export_count' => 0,
+                'generated_at' => now(),
+            ]);
+
+            $this->snapshotQuestions($paper, $result);
+
+            return $paper;
+        });
+    }
+
+    /**
+     * Promote a draft to a kept 'saved' paper on Save — this is where the paper
+     * first counts as "used": used_count and the blueprint's last_used_at are
+     * bumped now, not at generate time.
+     */
+    private function promoteDraft(Paper $draft, ?string $name): Paper
+    {
+        return DB::transaction(function () use ($draft, $name) {
+            $draft->status = 'saved';
+            if ($name !== null) {
+                $draft->name = $name;
+            }
+            $draft->save();
+
+            $pickedIds = $draft->paperQuestions()->pluck('question_id')->all();
+            if ($draft->blueprint) {
+                $this->markUsed($draft->blueprint, $pickedIds);
+            }
+
+            return $draft->fresh();
+        });
+    }
+
+    /**
+     * Write the selected questions as this paper's paper_questions snapshot.
+     *
+     * @return int[] the picked question ids
+     */
+    private function snapshotQuestions(Paper $paper, GenerationResult $result): array
+    {
+        $pickedIds = [];
+
+        foreach ($result->blueprint->slots as $slot) {
+            $question = $result->selections[$slot->index] ?? null;
+            if ($question === null) {
+                continue;
+            }
+
+            $paper->paperQuestions()->create([
+                'question_id' => $question->id,
+                'unit_id' => $this->snapshotUnitId($question, $result->blueprint->allowedUnitIds),
+                'section_label' => $slot->sectionLabel,
+                'display_no' => $slot->displayNo,
+                'marks' => $slot->marks,
+                'is_ai' => $question->source === 'ai',
+            ]);
+
+            $pickedIds[] = $question->id;
+        }
+
+        return $pickedIds;
+    }
+
+    /**
+     * Bump the denormalized usage counter (display + LRU tie-break) and stamp the
+     * blueprint's "last used". Only kept papers call this — never drafts.
+     *
+     * @param  int[]  $pickedIds
+     */
+    private function markUsed(Blueprint $blueprint, array $pickedIds): void
+    {
+        if (! empty($pickedIds)) {
+            Question::whereIn('id', $pickedIds)->increment('used_count');
+        }
+
+        $blueprint->update(['last_used_at' => now()]);
     }
 
     /**
@@ -270,6 +367,29 @@ class PaperController extends Controller
 
     /** Rename a saved paper. (Papers persist as 'saved' on Save, so there is no
      *  draft→saved transition to perform here any more.) */
+    /**
+     * Promote a draft paper to a kept 'saved' paper by id — the Save action from
+     * both the just-generated preview and a draft reopened from History (neither
+     * needs the generation seed; the draft's snapshot is already persisted).
+     * Idempotent: saving an already-kept paper only applies an optional rename.
+     */
+    public function save(Request $request, Paper $paper): JsonResponse
+    {
+        $this->authorizeOwner($request, $paper);
+
+        $validated = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+        ]);
+
+        if ($paper->status === 'draft') {
+            $paper = $this->promoteDraft($paper, $validated['name'] ?? null);
+        } elseif (isset($validated['name'])) {
+            $paper->fill(['name' => $validated['name']])->save();
+        }
+
+        return response()->json(['paper' => PaperViewModel::for($paper)->toArray()]);
+    }
+
     public function update(Request $request, Paper $paper): JsonResponse
     {
         $this->authorizeOwner($request, $paper);
@@ -300,14 +420,19 @@ class PaperController extends Controller
     {
         $userId = $request->user()->id;
 
-        // Owner-scoped on generated papers only — imported past exams (admin-owned,
-        // origin=imported) never surface in a teacher's analytics.
-        $paperIds = Paper::where('owner_id', $userId)->where('origin', 'generated')->pluck('id');
+        // Owner-scoped on kept generated papers only — imported past exams
+        // (admin-owned, origin=imported) and unsaved auto-drafts never surface in
+        // a teacher's analytics.
+        $keptPapers = fn ($q) => $q->where('owner_id', $userId)
+            ->where('origin', 'generated')
+            ->where('status', '!=', 'draft');
+
+        $paperIds = $keptPapers(Paper::query())->pluck('id');
         $usages = PaperQuestion::whereIn('paper_id', $paperIds);
 
         $questionsUsed = (clone $usages)->count();
         $uniqueQuestions = (clone $usages)->distinct('question_id')->count('question_id');
-        $totalExports = (int) Paper::where('owner_id', $userId)->where('origin', 'generated')->sum('export_count');
+        $totalExports = (int) $keptPapers(Paper::query())->sum('export_count');
 
         return response()->json([
             'generated' => $paperIds->count(),

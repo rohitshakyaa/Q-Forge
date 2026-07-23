@@ -63,8 +63,8 @@ class PaperExportTest extends TestCase
     }
 
     /**
-     * Generate a preview then Save it — the two-step flow the UI now uses — and
-     * return the persisted paper. (Generate no longer persists on its own.)
+     * Generate a preview then Save it — the two-step flow the UI uses. Generate
+     * auto-persists a draft; Save promotes that draft to a kept paper.
      */
     private function generateAndSave(Blueprint $blueprint): Paper
     {

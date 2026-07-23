@@ -240,6 +240,43 @@ export const usePapersStore = defineStore('papers', () => {
     }
   }
 
+  /**
+   * Promote a draft paper to 'saved' by id — the Save action from a draft opened
+   * in History (which has no generation seed) and, uniformly, from the just-made
+   * preview. Refreshes the cached copy so its status flips to 'saved'.
+   */
+  async function saveDraft(id: number, name?: string): Promise<number | null> {
+    saving.value = true;
+    error.value = null;
+    try {
+      const { data } = await api.post<{ paper: ApiPaper }>(`/papers/${id}/save`, name ? { name } : {});
+      const paper = mapPaper(data.paper);
+      current.value = paper;
+      if (paper.id !== null) cache(paper);
+
+      return paper.id;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Save failed';
+      return null;
+    } finally {
+      saving.value = false;
+    }
+  }
+
+  /** Discard (delete) a paper — used to throw away an unwanted draft. */
+  async function discardPaper(id: number): Promise<boolean> {
+    try {
+      await api.delete(`/papers/${id}`);
+      items.value = items.value.filter((p) => p.id !== id);
+      if (current.value?.id === id) current.value = null;
+
+      return true;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Discard failed';
+      return false;
+    }
+  }
+
   const resetGeneration = () => {
     generating.value = false;
     satisfiable.value = null;
@@ -443,6 +480,8 @@ export const usePapersStore = defineStore('papers', () => {
     saving,
     generate,
     savePaper,
+    saveDraft,
+    discardPaper,
     expandBank,
     resetGeneration,
     fetchHistory,

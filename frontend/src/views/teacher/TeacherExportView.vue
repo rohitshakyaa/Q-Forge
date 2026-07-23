@@ -76,7 +76,7 @@ const download = async () => {
               <div style="font-weight: 600; font-size: 13.5px">{{ f.label }}</div>
               <div style="font-size: 12px; color: var(--text3)">{{ f.desc }}</div>
             </div>
-            <QFBadge v-if="f.popular" variant="cyan">Popular</QFBadge>
+            <!-- <QFBadge v-if="f.popular" variant="cyan">Popular</QFBadge> -->
             <span v-if="selected === f.id" style="color: var(--cyan); font-size: 16px">✓</span>
           </div>
         </div>

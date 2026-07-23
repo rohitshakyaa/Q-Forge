@@ -31,9 +31,31 @@ const dayKey = (iso: string | null) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// Saved/Drafts view toggle. Defaults to "saved" (kept papers — saved + exported);
+// "draft" shows only the auto-saved previews; "all" shows both.
+type StatusView = 'saved' | 'draft' | 'all';
+const statusView = ref<StatusView>('saved');
+const statusViews: { value: StatusView; label: string }[] = [
+  { value: 'saved', label: 'Saved' },
+  { value: 'draft', label: 'Drafts' },
+  { value: 'all', label: 'All' },
+];
+
+type PaperStatus = 'draft' | 'saved' | 'exported';
+const statusLabel = (s: PaperStatus) => ({ draft: 'Draft', saved: 'Saved', exported: 'Exported' })[s];
+const statusVariant = (s: PaperStatus): 'warn' | 'neutral' | 'success' =>
+  s === 'draft' ? 'warn' : s === 'exported' ? 'success' : 'neutral';
+
+const draftCount = computed(() => store.list.filter((p) => p.status === 'draft').length);
+
+const matchesStatusView = (status: PaperStatus) =>
+  statusView.value === 'all' ||
+  (statusView.value === 'draft' ? status === 'draft' : status !== 'draft');
+
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
   return store.list.filter((p) => {
+    if (!matchesStatusView(p.status)) return false;
     if (q && !`${p.name} ${p.subject} ${p.subjectName ?? ''}`.toLowerCase().includes(q)) return false;
     const day = dayKey(p.generatedAt);
     if (dateFrom.value && day < dateFrom.value) return false;
@@ -54,6 +76,17 @@ const filtered = computed(() => {
       ]"
     />
     <div class="flex flex-wrap gap-3 mb-5 items-end">
+      <div class="qf-tabs" style="display: inline-flex; align-self: center">
+        <div
+          v-for="v in statusViews"
+          :key="v.value"
+          :class="['qf-tab', statusView === v.value && 'active']"
+          @click="statusView = v.value"
+        >
+          {{ v.label }}
+          <template v-if="v.value === 'draft' && draftCount"> ({{ draftCount }})</template>
+        </div>
+      </div>
       <div class="qf-field flex-1 min-w-55 sm:flex-none sm:w-72 m-0">
         <input v-model="search" class="qf-input" placeholder="Search papers…" />
       </div>
@@ -75,6 +108,7 @@ const filtered = computed(() => {
             <tr>
               <th style="padding-left: 20px">Paper</th>
               <th>Subject</th>
+              <th>Status</th>
               <th>Date</th>
               <th>Marks</th>
               <th>Questions</th>
@@ -84,7 +118,7 @@ const filtered = computed(() => {
           </thead>
           <tbody>
             <tr v-if="filtered.length === 0">
-              <td colspan="7" style="padding: 24px 20px; text-align: center; color: var(--text3); font-size: 13px">
+              <td colspan="8" style="padding: 24px 20px; text-align: center; color: var(--text3); font-size: 13px">
                 {{ hasFilters ? 'No papers match the current filters.' : 'No papers generated yet.' }}
               </td>
             </tr>
@@ -98,6 +132,7 @@ const filtered = computed(() => {
               <td style="color: var(--text2); font-size: 13px">
                 {{ p.subject }}<span v-if="p.subjectName" style="color: var(--text3)"> – {{ p.subjectName }}</span>
               </td>
+              <td><QFBadge :variant="statusVariant(p.status)">{{ statusLabel(p.status) }}</QFBadge></td>
               <td style="color: var(--text3); font-size: 12.5px">{{ p.date }}</td>
               <td style="font-family: var(--font-mono); font-size: 13px">{{ p.marks }}</td>
               <td>{{ p.questions }}</td>
